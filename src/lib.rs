@@ -1,7 +1,7 @@
 //! Simple line-based parser for airspace files in `OpenAir` format (used by
 //! flight instruments like Skytraxx and others).
 //!
-//! <http://www.winpilot.com/UsersGuide/UserAirspace.asp>
+//! <https://web.archive.org/web/20220703063934/http://www.winpilot.com/usersguide/userairspace.asp>
 //!
 //! If you want to use this library, you need the [`parse`](fn.parse.html)
 //! function as entry point.
@@ -11,7 +11,7 @@
 //!
 //! ## Implementation Notes
 //!
-//! Unfortunately the `OpenAir` format is really underspecified. Every device
+//! Unfortunately the `OpenAir` format is poorly specified. Every device
 //! uses varying conventions. For example, there is nothing we can use as clear
 //! delimiter for airspaces. Some files delimit airspaces with an empty line,
 //! some with a comment. But on the other hand, some files even place comments
@@ -33,6 +33,8 @@ use std::mem;
 use lazy_static::lazy_static;
 use log::{debug, trace};
 use regex::Regex;
+
+const ALTITUDE_FLOAT_TOLERANCE: f64 = 1e-6;
 
 #[cfg(feature = "serde")]
 use serde::Serialize;
@@ -58,12 +60,14 @@ pub enum Class {
     /// Controlled Traffic Region
     #[cfg_attr(feature = "serde", serde(rename = "CTR"))]
     Ctr,
+    /// Other/unknown class
+    Other,
+    /// Prohibited area
+    Prohibited,
     /// Restricted area
     Restricted,
     /// Danger area
     Danger,
-    /// Prohibited area
-    Prohibited,
     /// Prohibited for gliders
     GliderProhibited,
     /// Wave window
@@ -72,6 +76,39 @@ pub enum Class {
     RadioMandatoryZone,
     /// Transponder mandatory zone
     TransponderMandatoryZone,
+    /// OpenAir extension records for French airspace classes.
+    /// These extensions are documented in the following repository:
+    /// https://github.com/BPascal-91/eAirspacesFormats/tree/master/openair/#openair-extended---version-actuelle-%C3%A9tandue-avec-historique-des-%C3%A9volutions-
+    /// NOTAM
+    Notam,
+    /// NOTAM reference
+    NotamRef,
+    /// Zone Sensibilité Majeur
+    Zsm,
+    /// FFVL Protocole for PARAGLIDER
+    Ffvl,
+    /// FFVP Protocole for GLIDER
+    Ffvp,
+    /// Service d'Information en Vol
+    Siv,
+    /// Regulated Air Space
+    Ras,
+    /// Air Defense Identification Zone
+    Adiz,
+    /// Minimum Altitude Area
+    Ama,
+    /// PART of airspace
+    Part,
+    /// Flight Information Region
+    Fir,
+    /// Upper Flight Information Region
+    Uir,
+    /// Oceanic Control Area
+    Oca,
+    /// Political-administrative area
+    Political,
+    /// Airspace for which not even an FIR is defined
+    NoFir,
 }
 
 impl fmt::Display for Class {
@@ -91,13 +128,29 @@ impl Class {
             "F" => Ok(Self::F),
             "G" => Ok(Self::G),
             "CTR" => Ok(Self::Ctr),
+            "OTHER" => Ok(Self::Other),
+            "P" => Ok(Self::Prohibited),
             "R" => Ok(Self::Restricted),
             "Q" => Ok(Self::Danger),
-            "P" => Ok(Self::Prohibited),
             "GP" => Ok(Self::GliderProhibited),
             "W" => Ok(Self::WaveWindow),
             "RMZ" => Ok(Self::RadioMandatoryZone),
             "TMZ" => Ok(Self::TransponderMandatoryZone),
+            "NOTAM" => Ok(Self::Notam),
+            "NOTAM ref" | "NOTAMREF" => Ok(Self::NotamRef),
+            "ZSM" => Ok(Self::Zsm),
+            "FFVL" => Ok(Self::Ffvl),
+            "FFVP" => Ok(Self::Ffvp),
+            "SIV" => Ok(Self::Siv),
+            "RAS" => Ok(Self::Ras),
+            "ADIZ" => Ok(Self::Adiz),
+            "AMA" => Ok(Self::Ama),
+            "PART" => Ok(Self::Part),
+            "FIR" => Ok(Self::Fir),
+            "UIR" => Ok(Self::Uir),
+            "OCA" => Ok(Self::Oca),
+            "POLITICAL" => Ok(Self::Political),
+            "NO-FIR" | "NOFIR" => Ok(Self::NoFir),
             other => Err(format!("Invalid class: {}", other)),
         }
     }
@@ -163,9 +216,13 @@ impl Altitude {
                 }
             }
             other => {
-                let is_digit = |c: &char| c.is_ascii_digit();
-                let number: String = other.chars().take_while(is_digit).collect();
-                let rest: String = other.chars().skip_while(is_digit).collect();
+                let is_digit_or_dot = |c: &char| c.is_ascii_digit() || *c == '.';
+                let number: String = other.chars().take_while(is_digit_or_dot).collect();
+                let rest: String = other.chars().skip_while(is_digit_or_dot).collect();
+                // Validate that number contains at most one dot
+                if number.chars().filter(|&c| c == '.').count() > 1 {
+                    return Err(format!("Invalid altitude: multiple dots in number '{}'", number));
+                }
                 lazy_static! {
                     static ref RE_FT_AMSL: Regex = Regex::new(r"(?i)^ft(:? a?msl)?$").unwrap();
                     static ref RE_M_AMSL: Regex = Regex::new(r"(?i)^m(:?sl)?$").unwrap();
@@ -174,16 +231,29 @@ impl Altitude {
                     static ref RE_M_AGL: Regex =
                         Regex::new(r"(?i)^(:?m )?(:?agl|gnd|sfc)$").unwrap();
                 }
-                if let Ok(val) = number.parse::<i32>() {
-                    let trimmed = rest.trim();
-                    if RE_FT_AMSL.is_match(trimmed) {
-                        return Ok(Self::FeetAmsl(val));
-                    } else if RE_FT_AGL.is_match(trimmed) {
-                        return Ok(Self::FeetAgl(val));
-                    } else if RE_M_AMSL.is_match(trimmed) {
-                        return Ok(Self::FeetAmsl(Self::m2ft(val)?));
-                    } else if RE_M_AGL.is_match(trimmed) {
-                        return Ok(Self::FeetAgl(Self::m2ft(val)?));
+                if !number.is_empty() {
+                    // Try to parse as float, then as int
+                    if let Ok(val_f) = number.parse::<f64>() {
+                        // Only allow conversion if the float is very close to a whole number
+                        if val_f.fract().abs() > ALTITUDE_FLOAT_TOLERANCE {
+                            // Instead of error, return Ok with rounded value and log debug
+                            log::debug!(
+                                "Altitude value '{}' was rounded to nearest integer ({})",
+                                number,
+                                val_f.round() as i32
+                            );
+                        }
+                        let val = val_f.round() as i32;
+                        let trimmed = rest.trim();
+                        if RE_FT_AMSL.is_match(trimmed) {
+                            return Ok(Self::FeetAmsl(val));
+                        } else if RE_FT_AGL.is_match(trimmed) {
+                            return Ok(Self::FeetAgl(val));
+                        } else if RE_M_AMSL.is_match(trimmed) {
+                            return Ok(Self::FeetAmsl(Self::m2ft(val)?));
+                        } else if RE_M_AGL.is_match(trimmed) {
+                            return Ok(Self::FeetAgl(Self::m2ft(val)?));
+                        }
                     }
                 }
                 Ok(Self::Other(other.to_string()))
@@ -821,6 +891,14 @@ mod tests {
                 Altitude::parse("42 ft AMSL").unwrap(),
                 Altitude::FeetAmsl(42)
             );
+            // Extended: floats and meters
+            assert_eq!(Altitude::parse("4500.0FT AMSL").unwrap(), Altitude::FeetAmsl(4500));
+            assert_eq!(Altitude::parse("4500.0 ft AMSL").unwrap(), Altitude::FeetAmsl(4500));
+            assert_eq!(Altitude::parse("1371m").unwrap(), Altitude::FeetAmsl(4498));
+            assert_eq!(Altitude::parse("1371 msl").unwrap(), Altitude::FeetAmsl(4498));
+            assert_eq!(Altitude::parse("4500.0ft").unwrap(), Altitude::FeetAmsl(4500));
+            assert_eq!(Altitude::parse("4500.0 FT").unwrap(), Altitude::FeetAmsl(4500));
+            assert_eq!(Altitude::parse("0m").unwrap(), Altitude::FeetAmsl(0));
         }
 
         #[test]
@@ -830,6 +908,22 @@ mod tests {
             assert_eq!(Altitude::parse("42 ft GND").unwrap(), Altitude::FeetAgl(42));
             assert_eq!(Altitude::parse("42 GND").unwrap(), Altitude::FeetAgl(42));
             assert_eq!(Altitude::parse("42SFC").unwrap(), Altitude::FeetAgl(42));
+            // Extended: floats and meters
+            assert_eq!(Altitude::parse("500ft agl").unwrap(), Altitude::FeetAgl(500));
+            assert_eq!(Altitude::parse("500.0FT GND").unwrap(), Altitude::FeetAgl(500));
+            assert_eq!(Altitude::parse("500 m agl").unwrap(), Altitude::FeetAgl(1640));
+        }
+
+        #[test]
+        fn parse_rounded_float_altitude() {
+            // Values that are not exactly whole numbers, but close enough to be rounded
+            assert_eq!(Altitude::parse("4500.4 ft").unwrap(), Altitude::FeetAmsl(4500));
+            assert_eq!(Altitude::parse("4500.6 ft").unwrap(), Altitude::FeetAmsl(4501));
+            assert_eq!(Altitude::parse("500.49 ft agl").unwrap(), Altitude::FeetAgl(500));
+            assert_eq!(Altitude::parse("500.51 ft agl").unwrap(), Altitude::FeetAgl(501));
+            // Values with a significant fractional part should still be accepted, but log info
+            assert_eq!(Altitude::parse("1234.123 ft").unwrap(), Altitude::FeetAmsl(1234));
+            assert_eq!(Altitude::parse("999.999 ft agl").unwrap(), Altitude::FeetAgl(1000));
         }
 
         #[test]
@@ -843,6 +937,26 @@ mod tests {
                 Altitude::parse("FL130").unwrap(),
                 Altitude::FlightLevel(130)
             );
+        }
+
+        #[test]
+        fn parse_unlimited_and_other() {
+            assert_eq!(Altitude::parse("UNLIM").unwrap(), Altitude::Unlimited);
+            assert_eq!(Altitude::parse("unlimited").unwrap(), Altitude::Unlimited);
+            assert!(matches!(Altitude::parse("foo"), Ok(Altitude::Other(_))));
+            assert!(matches!(Altitude::parse("123 bananas"), Ok(Altitude::Other(_))));
+        }
+
+        #[test]
+        fn parse_errors() {
+            // Should error for invalid FL
+            assert!(Altitude::parse("FLabc").is_err());
+            // Should error for out-of-bounds meters
+            assert!(Altitude::parse("654553016m").is_err());
+            // Should error for multiple dots in number
+            assert!(Altitude::parse("4500.0.5FT").is_err());
+            assert!(Altitude::parse("123..45 ft").is_err());
+            assert!(Altitude::parse("..123 ft").is_err());
         }
     }
 
@@ -936,6 +1050,239 @@ mod tests {
                 assert_eq!(segments.len(), 5);
             } else {
                 panic!("Unexpected enum variant");
+            }
+        }
+
+        /// Parsing of NOTAM reference class.
+        #[test]
+        fn parse_notamref() {
+            assert_eq!(Class::parse("NOTAMREF").unwrap(), Class::NotamRef);
+            assert_eq!(Class::parse("NOTAM ref").unwrap(), Class::NotamRef);
+        }
+
+        /// Test parsing of a real-world FFVL airspace example.
+        #[test]
+        fn parse_ffvl_mundolsheim() {
+            let mut airspace = indoc!(
+                "
+                * en: (c) FFVL 14/02/2007 - Activité de vol libre de Mundolsheim. Afin de
+                *     permettre le déroulement d'une activité de vol libre ŕ Mundolsheim en
+                *     espace aérien non contrôlé, un volume a été exclu en permanence de la CTR
+                *     1 Strasbourg Entzheim de classe D.
+                AC FFVL
+                AN FFVL-Prot Vol libre Mundolsheim (PARAGLIDER) (LFFFVLMundolsheim)
+                AH 500ft AGL
+                AL GND
+                V X=48:38:00.00 N 007:42:34.00 E
+                DC 1.0
+            "
+            )
+            .as_bytes();
+            let mut spaces = parse(&mut airspace).unwrap();
+            assert_eq!(spaces.len(), 1);
+            let space: Airspace = spaces.pop().unwrap();
+            assert_eq!(
+                space.class,
+                Class::Ffvl,
+                "Expected class FFVL, got {:?}",
+                space.class
+            );
+            assert_eq!(
+                space.name,
+                "FFVL-Prot Vol libre Mundolsheim (PARAGLIDER) (LFFFVLMundolsheim)"
+            );
+            assert_eq!(space.upper_bound, Altitude::FeetAgl(500));
+            assert_eq!(space.lower_bound, Altitude::Gnd);
+            match space.geom {
+                Geometry::Circle {
+                    centerpoint,
+                    radius,
+                } => {
+                    assert!((centerpoint.lat - 48.63333333333333).abs() < 1e-8);
+                    assert!((centerpoint.lng - 7.709444444444444).abs() < 1e-8);
+                    assert!((radius - 1.0).abs() < 1e-6);
+                }
+                _ => panic!("Expected circle geometry"),
+            }
+        }
+
+        /// Test parsing of a real-world ZSM airspace example.
+        #[test]
+        fn parse_zsm_gypaete_barbu() {
+            let mut airspace = indoc!(
+                "
+                AC ZSM
+                AY PROTECT
+                AN PROTECT 2827 Gypaete barbu - Zone Tampon 300m/sol (BIRD)
+                *AUID GUId=LFZSMDSTAC2827 UId=28 Id=LFZSMDSTAC2827
+                *AAlt [\"SFC/985FT AGL\", \"0m/2795m\"]
+                *ADescr [Pascal Bazile (c) 04/2025] ZSM T-73 HM 014 | N-22-0000092 | Andagne 1 - (2827) [source - https://parapente.ffvl.fr/harmonie-rapaces]
+                *AActiv [TIMSH] Survol interdit à moins de 300m/sol; période: 1=(01/01->31/08) 2=(01/11->31/12)
+                *ATimes {\"1\": [\"UTC(01/01->31/08)\", \"ANY(00:00->23:59)\"], \"2\": [\"UTC(01/11->31/12)\", \"ANY(00:00->23:59)\"]}
+                AH 985FT AGL
+                AL SFC
+                DP 45:20:35 N 007:01:35 E
+                DP 45:20:53 N 007:01:45 E
+                DP 45:20:59 N 007:01:51 E
+                DP 45:20:59 N 007:02:12 E
+                DP 45:20:50 N 007:02:29 E
+                DP 45:20:47 N 007:02:32 E
+                DP 45:20:41 N 007:02:34 E
+                DP 45:20:27 N 007:02:35 E
+                DP 45:20:17 N 007:02:37 E
+                DP 45:20:12 N 007:02:43 E
+                DP 45:20:09 N 007:02:44 E
+                DP 45:20:07 N 007:02:41 E
+                DP 45:20:03 N 007:02:39 E
+                DP 45:19:51 N 007:02:27 E
+                DP 45:19:50 N 007:02:19 E
+                DP 45:19:48 N 007:02:13 E
+                DP 45:19:42 N 007:02:12 E
+                DP 45:19:41 N 007:01:39 E
+                DP 45:19:43 N 007:01:29 E
+                DP 45:19:48 N 007:01:26 E
+                DP 45:19:55 N 007:01:32 E
+                DP 45:20:03 N 007:01:32 E
+                DP 45:20:09 N 007:01:30 E
+                DP 45:20:12 N 007:01:31 E
+                DP 45:20:18 N 007:01:24 E
+                DP 45:20:24 N 007:01:25 E
+                DP 45:20:35 N 007:01:35 E
+                "
+            )
+            .as_bytes();
+            let mut spaces = parse(&mut airspace).unwrap();
+            assert_eq!(spaces.len(), 1);
+            let space: Airspace = spaces.pop().unwrap();
+            assert_eq!(space.class, Class::Zsm);
+            assert_eq!(space.type_, Some("PROTECT".to_string()));
+            assert_eq!(
+                space.name,
+                "PROTECT 2827 Gypaete barbu - Zone Tampon 300m/sol (BIRD)"
+            );
+            assert_eq!(space.upper_bound, Altitude::FeetAgl(985));
+            assert_eq!(space.lower_bound, Altitude::Gnd);
+            match space.geom {
+                Geometry::Polygon { segments } => {
+                    // Should be 27 points (closed polygon)
+                    assert_eq!(segments.len(), 27);
+                    // Check first and last point are the same
+                    if let (PolygonSegment::Point(first), PolygonSegment::Point(last)) =
+                        (&segments[0], &segments[segments.len() - 1])
+                    {
+                        assert!((first.lat - last.lat).abs() < 1e-8);
+                        assert!((first.lng - last.lng).abs() < 1e-8);
+                    }
+                }
+                _ => panic!("Expected polygon geometry"),
+            }
+        }
+
+        /// Test parsing of a real-world FFVP airspace example.
+        #[test]
+        fn parse_ffvp_echo2() {
+            let mut airspace = indoc!(
+                "
+                AC FFVP
+                AY FFVP-Prot
+                AN FFVP-Prot RMZ ECHO 2 App(122.550 puis 122.500) (GLIDER)
+                AF 122.550 puis 122.500
+                *AUID GUId=LFFFVPECHO2 UId=29 Id=LFFFVPECHO2
+                *AAlt [\"3300FT AMSL/4000FT AMSL\", \"1005m/1219m\"]
+                *ADescr (c) FFVP 13/03/2017 - COULOIRS DE TRANSIT COGNAC - Premier contact à réaliser sur fréquence 122.550 Mhz (répondeur automatique si terrain fermé). Après premier contact, veille sur la fréquence vol à voile 122.500 Mhz ou autre fréquence particulière annoncée par le planeur aux contrôleurs de Cognac. Lapproche de Cognac précisera, lors de ce premier contact, laltitude maximale utilisable dans le couloir. Les planeurs devront être sur la fréquence 122.55 Mhz pour toute évolution au-dessus de cette altitude définie ou en dehors des couloirs. De plus, un report de position devra être fait sur la fréquence 122.55 Mhz toutes les 30 min, et/ouavant de quitter la zone
+                *AActiv [HX] Premier contact sur fréquence 122.550 Mhz. Ensuite, veille radio permanente sur 122.500 Mhz - (Protocole) https://federation.ffvl.fr/sites/ffvl.fr/files/Cognac_0.pdf
+                *AMhz {\"APP\": [\"122.550 puis 122.500\"], \"APP1\": [\"122.550\"], \"APP2\": [\"122.500\"], \"MHZ\": [\"122.55\"]}
+                AH 4000FT AMSL
+                AL 3300FT AMSL
+                DP 45:38:16 N 000:02:40 E
+                DP 45:37:23 N 000:16:54 E
+                DP 45:46:50 N 000:20:11 E
+                DP 46:00:00 N 000:23:19 E
+                DP 45:53:54 N 000:10:44 E
+                DP 45:48:38 N 000:08:00 E
+                V X=45:49:26 N 000:01:58 W
+                V D=+
+                DB 45:48:38 N 000:08:00 E, 45:45:41 N 000:06:29 E
+                DP 45:45:41 N 000:06:29 E
+                DP 45:38:16 N 000:02:40 E
+                "
+            )
+            .as_bytes();
+            let mut spaces = parse(&mut airspace).unwrap();
+            assert_eq!(spaces.len(), 1);
+            let space: Airspace = spaces.pop().unwrap();
+            assert_eq!(space.class, Class::Ffvp);
+            assert_eq!(space.type_, Some("FFVP-Prot".to_string()));
+            assert_eq!(
+                space.name,
+                "FFVP-Prot RMZ ECHO 2 App(122.550 puis 122.500) (GLIDER)"
+            );
+            assert_eq!(space.frequency, Some("122.550 puis 122.500".to_string()));
+            assert_eq!(space.upper_bound, Altitude::FeetAmsl(4000));
+            assert_eq!(space.lower_bound, Altitude::FeetAmsl(3300));
+            match space.geom {
+                Geometry::Polygon { segments } => {
+                    // Should be 9 segments: 6 DP, 1 Arc (DB), 2 DP
+                    assert_eq!(segments.len(), 9);
+                    // Check first and last point are the same (polygon closed)
+                    if let (PolygonSegment::Point(first), PolygonSegment::Point(last)) =
+                        (&segments[0], &segments[segments.len() - 1])
+                    {
+                        assert!((first.lat - last.lat).abs() < 1e-8);
+                        assert!((first.lng - last.lng).abs() < 1e-8);
+                    }
+                    // Check that there is at least one Arc segment
+                    assert!(segments.iter().any(|seg| matches!(seg, PolygonSegment::Arc(_))));
+                }
+                _ => panic!("Expected polygon geometry"),
+            }
+        }
+
+        /// Test parsing of an airspace with class OTHER.
+        #[test]
+        fn parse_other_class() {
+            let mut airspace = indoc!(
+                "
+                AC OTHER
+                AY TRA
+                AN TRA 22C (MILOPS)
+                *AUID GUId=EPTR22C UId=400003114648138 Id=EPTR22C
+                *AAlt [\"SFC/4500.0FT AMSL\", \"0m/1371m\"]
+                *ADescr Current time:2025-04-08 14:50:07.707
+                AH 4500.0FT AMSL
+                AL SFC
+                DP 52:53:55 N 018:00:00 E
+                DP 52:55:41 N 018:14:53 E
+                DP 52:53:43 N 018:20:49 E
+                DP 52:53:02 N 018:17:28 E
+                DP 52:51:11 N 018:11:57 E
+                DP 52:47:18 N 018:12:17 E
+                DP 52:45:36 N 018:15:44 E
+                DP 52:38:50 N 018:11:00 E
+                DP 52:40:17 N 018:00:00 E
+                DP 52:53:55 N 018:00:00 E
+                "
+            )
+            .as_bytes();
+            let mut spaces = parse(&mut airspace).unwrap();
+            assert_eq!(spaces.len(), 1);
+            let space: Airspace = spaces.pop().unwrap();
+            assert_eq!(space.class, Class::Other);
+            assert_eq!(space.type_, Some("TRA".to_string()));
+            assert_eq!(space.name, "TRA 22C (MILOPS)");
+            assert_eq!(space.upper_bound, Altitude::FeetAmsl(4500));
+            assert_eq!(space.lower_bound, Altitude::Gnd);
+            match space.geom {
+                Geometry::Polygon { segments } => {
+                    assert_eq!(segments.len(), 10);
+                    if let (PolygonSegment::Point(first), PolygonSegment::Point(last)) =
+                        (&segments[0], &segments[segments.len() - 1])
+                    {
+                        assert!((first.lat - last.lat).abs() < 1e-8);
+                        assert!((first.lng - last.lng).abs() < 1e-8);
+                    }
+                }
+                _ => panic!("Expected polygon geometry"),
             }
         }
 

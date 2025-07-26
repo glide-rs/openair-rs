@@ -44,7 +44,7 @@
 *                     ;     Currently the following variables are supported:
 *                     ;     D={+|-}    sets direction for: DA and DB records
 *                     ;                     '-' means counterclockwise direction; '+' is the default
-*                     ;                     automatically reset to '+' at the begining of new airspace segment
+*                     ;                     automatically reset to '+' at the beginning of new airspace segment
 *                     ;     X=coordinate    : sets the center for the following records: DA, DB, and DC
 *                     ;     W=number        : sets the width of an airway in nm (NYI)
 *                     ;      Z=number         : sets zoom level at which the element becomes visible (WP version 1.130 and newer)
