@@ -223,8 +223,8 @@ impl Direction {
 #[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct Coord {
-    lat: f64,
-    lng: f64,
+    pub lat: f64,
+    pub lng: f64,
 }
 
 impl Coord {
@@ -294,11 +294,11 @@ impl Coord {
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct ArcSegment {
-    centerpoint: Coord,
-    radius: f32,
-    angle_start: f32,
-    angle_end: f32,
-    direction: Direction,
+    pub centerpoint: Coord,
+    pub radius: f32,
+    pub angle_start: f32,
+    pub angle_end: f32,
+    pub direction: Direction,
 }
 
 impl ArcSegment {
@@ -338,10 +338,10 @@ impl ArcSegment {
 #[derive(Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct Arc {
-    centerpoint: Coord,
-    start: Coord,
-    end: Coord,
-    direction: Direction,
+    pub centerpoint: Coord,
+    pub start: Coord,
+    pub end: Coord,
+    pub direction: Direction,
 }
 
 impl Arc {
