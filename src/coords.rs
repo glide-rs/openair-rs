@@ -96,71 +96,37 @@ impl Coord {
 
 #[cfg(test)]
 mod tests {
+    use insta::assert_compact_debug_snapshot;
+
     use super::*;
 
     #[test]
     fn parse_valid() {
         // With spaces
-        assert_eq!(
-            Coord::parse("46:51:44 N 009:19:42 E"),
-            Ok(Coord {
-                lat: 46.86222222222222,
-                lng: 9.328333333333333
-            })
-        );
+        assert_compact_debug_snapshot!(Coord::parse("46:51:44 N 009:19:42 E"), @"Ok(Coord { lat: 46.86222222222222, lng: 9.328333333333333 })");
 
         // Without spaces
-        assert_eq!(
-            Coord::parse("46:51:44N 009:19:42E"),
-            Ok(Coord {
-                lat: 46.86222222222222,
-                lng: 9.328333333333333
-            })
-        );
+        assert_compact_debug_snapshot!(Coord::parse("46:51:44N 009:19:42E"), @"Ok(Coord { lat: 46.86222222222222, lng: 9.328333333333333 })");
 
-        // DDM format (degrees and decimal minutes)
-        assert_eq!(
-            Coord::parse("46:51.44 N 009:19.42 E"),
-            Ok(Coord {
-                lat: 46.85733333333334,
-                lng: 9.323666666666666
-            })
-        );
+        // Dot between min and sec
+        assert_compact_debug_snapshot!(Coord::parse("46:51.44 N 009:19.42 E"), @"Ok(Coord { lat: 46.85733333333334, lng: 9.323666666666666 })");
 
         // South / west
-        assert_eq!(
-            Coord::parse("46:51:44 S 009:19:42 W"),
-            Ok(Coord {
-                lat: -46.86222222222222,
-                lng: -9.328333333333333
-            })
-        );
+        assert_compact_debug_snapshot!(Coord::parse("46:51:44 S 009:19:42 W"), @"Ok(Coord { lat: -46.86222222222222, lng: -9.328333333333333 })");
 
         // Fractional part
-        assert_eq!(
-            Coord::parse("1:0:0.123 N 2:0:1.2 E"),
-            Ok(Coord {
-                lat: 1.0 + 0.123 / 3600.0,
-                lng: 2.0 + 1.2 / 3600.0
-            })
-        );
+        assert_compact_debug_snapshot!(Coord::parse("1:0:0.123 N 2:0:1.2 E"), @"Ok(Coord { lat: 1.0000341666666666, lng: 2.0003333333333333 })");
 
         // Comma in between
-        assert!(Coord::parse("45:42:21 N, 000:38:41 W").is_ok());
+        assert_compact_debug_snapshot!(Coord::parse("45:42:21 N, 000:38:41 W"), @"Ok(Coord { lat: 45.70583333333334, lng: -0.6447222222222222 })");
 
         // Lowercase letters
-        assert!(Coord::parse("49:33:8 n 5:47:37 e").is_ok());
+        assert_compact_debug_snapshot!(Coord::parse("49:33:8 n 5:47:37 e"), @"Ok(Coord { lat: 49.55222222222222, lng: 5.793611111111111 })");
     }
 
     #[test]
     fn parse_invalid() {
-        assert_eq!(
-            Coord::parse("46:51:44 Q 009:19:42 R"),
-            Err("Invalid coord: \"46:51:44 Q 009:19:42 R\"".to_string())
-        );
-        assert_eq!(
-            Coord::parse("46x51x44 S 009x19x42 W"),
-            Err("Invalid coord: \"46x51x44 S 009x19x42 W\"".to_string())
-        );
+        assert_compact_debug_snapshot!(Coord::parse("46:51:44 Q 009:19:42 R"), @r#"Err("Invalid coord: \"46:51:44 Q 009:19:42 R\"")"#);
+        assert_compact_debug_snapshot!(Coord::parse("46x51x44 S 009x19x42 W"), @r#"Err("Invalid coord: \"46x51x44 S 009x19x42 W\"")"#);
     }
 }
