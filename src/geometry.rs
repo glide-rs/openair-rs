@@ -145,60 +145,78 @@ impl fmt::Display for Geometry {
 
 #[cfg(test)]
 mod tests {
+    use insta::{assert_compact_debug_snapshot, assert_debug_snapshot};
+
     use super::*;
 
     static COORD: Coord = Coord { lat: 1.0, lng: 2.0 };
 
     #[test]
     fn parse_ok() {
-        assert_eq!(
-            ArcSegment::parse("10,270,290", COORD.clone(), Direction::Cw).unwrap(),
-            ArcSegment {
-                centerpoint: COORD.clone(),
-                radius: 10.0,
-                angle_start: 270.0,
-                angle_end: 290.0,
-                direction: Direction::Cw,
-            }
-        );
-        assert_eq!(
-            ArcSegment::parse("23,0,30", COORD.clone(), Direction::Ccw).unwrap(),
-            ArcSegment {
-                centerpoint: COORD.clone(),
-                radius: 23.0,
-                angle_start: 0.0,
-                angle_end: 30.0,
-                direction: Direction::Ccw,
-            }
-        );
+        assert_debug_snapshot!(ArcSegment::parse("10,270,290", COORD.clone(), Direction::Cw).unwrap(), @r"
+        ArcSegment {
+            centerpoint: Coord {
+                lat: 1.0,
+                lng: 2.0,
+            },
+            radius: 10.0,
+            angle_start: 270.0,
+            angle_end: 290.0,
+            direction: Cw,
+        }
+        ");
+
+        assert_debug_snapshot!(ArcSegment::parse("23,0,30", COORD.clone(), Direction::Ccw).unwrap(), @r"
+        ArcSegment {
+            centerpoint: Coord {
+                lat: 1.0,
+                lng: 2.0,
+            },
+            radius: 23.0,
+            angle_start: 0.0,
+            angle_end: 30.0,
+            direction: Ccw,
+        }
+        ");
     }
 
     #[test]
     fn parse_with_spaces() {
-        assert_eq!(
-            ArcSegment::parse(" 10 ,    270 ,290", COORD.clone(), Direction::Cw).unwrap(),
-            ArcSegment {
-                centerpoint: COORD.clone(),
-                radius: 10.0,
-                angle_start: 270.0,
-                angle_end: 290.0,
-                direction: Direction::Cw,
-            }
-        );
+        assert_debug_snapshot!(ArcSegment::parse(" 10 ,    270 ,290", COORD.clone(), Direction::Cw).unwrap(), @r"
+        ArcSegment {
+            centerpoint: Coord {
+                lat: 1.0,
+                lng: 2.0,
+            },
+            radius: 10.0,
+            angle_start: 270.0,
+            angle_end: 290.0,
+            direction: Cw,
+        }
+        ");
     }
 
     #[test]
     fn parse_invalid_too_many() {
-        assert!(ArcSegment::parse(" 10 ,    270 ,290,", COORD.clone(), Direction::Cw).is_err());
+        assert_compact_debug_snapshot!(
+            ArcSegment::parse(" 10 ,    270 ,290,", COORD.clone(), Direction::Cw),
+            @r#"Err("Invalid arc segment data:  10 ,    270 ,290,")"#,
+        );
     }
 
     #[test]
     fn parse_invalid_angle_too_large() {
-        assert!(ArcSegment::parse("10,270,361", COORD.clone(), Direction::Cw).is_err());
+        assert_compact_debug_snapshot!(
+            ArcSegment::parse("10,270,361", COORD.clone(), Direction::Cw),
+            @r#"Err("Angle 361 too large")"#,
+        );
     }
 
     #[test]
     fn parse_invalid_angle_negative() {
-        assert!(ArcSegment::parse("10,270,-10", COORD.clone(), Direction::Cw).is_err());
+        assert_compact_debug_snapshot!(
+            ArcSegment::parse("10,270,-10", COORD.clone(), Direction::Cw),
+            @r#"Err("Angle -10 is negative")"#,
+        );
     }
 }
