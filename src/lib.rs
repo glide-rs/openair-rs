@@ -29,8 +29,8 @@
 use std::fmt;
 use std::io::BufRead;
 use std::mem;
+use std::sync::LazyLock;
 
-use lazy_static::lazy_static;
 use log::{debug, trace};
 use regex::Regex;
 
@@ -166,14 +166,16 @@ impl Altitude {
                 let is_digit = |c: &char| c.is_ascii_digit();
                 let number: String = other.chars().take_while(is_digit).collect();
                 let rest: String = other.chars().skip_while(is_digit).collect();
-                lazy_static! {
-                    static ref RE_FT_AMSL: Regex = Regex::new(r"(?i)^ft(:? a?msl)?$").unwrap();
-                    static ref RE_M_AMSL: Regex = Regex::new(r"(?i)^m(:?sl)?$").unwrap();
-                    static ref RE_FT_AGL: Regex =
-                        Regex::new(r"(?i)^(:?ft )?(:?agl|gnd|sfc)$").unwrap();
-                    static ref RE_M_AGL: Regex =
-                        Regex::new(r"(?i)^(:?m )?(:?agl|gnd|sfc)$").unwrap();
-                }
+
+                static RE_FT_AMSL: LazyLock<Regex> =
+                    LazyLock::new(|| Regex::new(r"(?i)^ft(:? a?msl)?$").unwrap());
+                static RE_M_AMSL: LazyLock<Regex> =
+                    LazyLock::new(|| Regex::new(r"(?i)^m(:?sl)?$").unwrap());
+                static RE_FT_AGL: LazyLock<Regex> =
+                    LazyLock::new(|| Regex::new(r"(?i)^(:?ft )?(:?agl|gnd|sfc)$").unwrap());
+                static RE_M_AGL: LazyLock<Regex> =
+                    LazyLock::new(|| Regex::new(r"(?i)^(:?m )?(:?agl|gnd|sfc)$").unwrap());
+
                 if let Ok(val) = number.parse::<i32>() {
                     let trimmed = rest.trim();
                     if RE_FT_AMSL.is_match(trimmed) {
@@ -263,8 +265,8 @@ impl Coord {
     }
 
     fn parse(data: &str) -> Result<Self, String> {
-        lazy_static! {
-            static ref RE: Regex = Regex::new(
+        static RE: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(
                 r"(?xi)
                 ([0-9]{1,3}[\.:][0-9]{1,3}[\.:][0-9]{1,3}(:?\.?[0-9]{1,3})?)  # Lat
                 \s*
@@ -273,10 +275,10 @@ impl Coord {
                 ([0-9]{1,3}[\.:][0-9]{1,3}[\.:][0-9]{1,3}(:?\.?[0-9]{1,3})?)  # Lon
                 \s*
                 ([EW])                                    # East / West
-            "
+            ",
             )
-            .unwrap();
-        }
+            .unwrap()
+        });
         let invalid = |_| format!("Invalid coord: \"{data}\"");
         let cap = RE
             .captures(data)
