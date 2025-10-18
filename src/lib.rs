@@ -429,6 +429,9 @@ pub struct Airspace {
     /// Call-sign for this station
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub call_sign: Option<String>,
+    /// Transponder code associated with this airspace
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub transponder_code: Option<u16>,
 }
 
 impl fmt::Display for Airspace {
@@ -456,6 +459,7 @@ struct AirspaceBuilder {
     type_: Option<String>,
     frequency: Option<String>,
     call_sign: Option<String>,
+    transponder_code: Option<u16>,
 
     // Variables
     var_x: Option<Coord>,
@@ -497,6 +501,7 @@ impl AirspaceBuilder {
             type_: None,
             frequency: None,
             call_sign: None,
+            transponder_code: None,
             var_x: None,
             var_d: None,
         }
@@ -509,6 +514,7 @@ impl AirspaceBuilder {
     setter!(ONCE, set_type, type_, String);
     setter!(ONCE, set_frequency, frequency, String);
     setter!(ONCE, set_call_sign, call_sign, String);
+    setter!(ONCE, set_transponder_code, transponder_code, u16);
     setter!(MANY, set_var_x, var_x, Coord);
     setter!(MANY, set_var_d, var_d, Direction);
 
@@ -569,6 +575,7 @@ impl AirspaceBuilder {
             geom,
             frequency: self.frequency,
             call_sign: self.call_sign,
+            transponder_code: self.transponder_code,
         })
     }
 }
@@ -628,6 +635,13 @@ fn process(builder: &mut AirspaceBuilder, line: &str) -> Result<(), String> {
         ('A', 'G') => {
             trace!("-> Found call sign: {}", data);
             builder.set_call_sign(data.to_string())?;
+        }
+        ('A', 'X') => {
+            let transponder_code = data
+                .parse()
+                .map_err(|_| format!("Invalid transponder code: {}", data))?;
+            trace!("-> Found transponder code: {}", transponder_code);
+            builder.set_transponder_code(transponder_code)?;
         }
         ('S', 'P') => trace!("-> Pen, ignore"),
         ('S', 'B') => trace!("-> Brush, ignore"),
@@ -1032,6 +1046,7 @@ mod tests {
                 AY AWY
                 AF 132.350
                 AG Dutch Mil
+                AX 1234
                 V X=52:00:00 N 013:00:00 E
                 DC 5
             "
@@ -1041,6 +1056,7 @@ mod tests {
             assert_eq!(airspace.type_, Some("AWY".to_string()));
             assert_eq!(airspace.frequency, Some("132.350".to_string()));
             assert_eq!(airspace.call_sign, Some("Dutch Mil".to_string()));
+            assert_eq!(airspace.transponder_code, Some(1234));
         }
     }
 
@@ -1082,6 +1098,7 @@ mod tests {
                 type_: None,
                 frequency: None,
                 call_sign: None,
+                transponder_code: None,
             };
             assert_eq!(
                 to_string(&airspace).unwrap(),
@@ -1123,6 +1140,7 @@ mod tests {
                 type_: None,
                 frequency: None,
                 call_sign: None,
+                transponder_code: None,
             };
             assert_eq!(
                 to_string(&airspace).unwrap(),
