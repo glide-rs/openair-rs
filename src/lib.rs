@@ -648,6 +648,7 @@ fn process(builder: &mut AirspaceBuilder, line: &str) -> Result<(), String> {
             trace!("-> Found transponder code: {}", transponder_code);
             builder.set_transponder_code(transponder_code)?;
         }
+        ('A', _) => trace!("-> Found unknown extension record: {}", line),
         ('S', 'P') => trace!("-> Pen, ignore"),
         ('S', 'B') => trace!("-> Brush, ignore"),
         ('V', 'X') => {
@@ -1052,6 +1053,7 @@ mod tests {
                 AF 132.350
                 AG Dutch Mil
                 AX 1234
+                A* custom extension
                 V X=52:00:00 N 013:00:00 E
                 DC 5
             "
