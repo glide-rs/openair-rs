@@ -72,6 +72,8 @@ pub enum Class {
     RadioMandatoryZone,
     /// Transponder mandatory zone
     TransponderMandatoryZone,
+    /// Unclassified
+    Unclassified,
 }
 
 impl fmt::Display for Class {
@@ -98,6 +100,7 @@ impl Class {
             "W" => Ok(Self::WaveWindow),
             "RMZ" => Ok(Self::RadioMandatoryZone),
             "TMZ" => Ok(Self::TransponderMandatoryZone),
+            "UNC" => Ok(Self::Unclassified),
             other => Err(format!("Invalid class: {other}")),
         }
     }
