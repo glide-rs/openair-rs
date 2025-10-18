@@ -1,0 +1,17 @@
+---
+source: tests/parser.rs
+expression: names
+---
+[
+    "FIR Bremen 125.100 [C] (FL100 → FL245) {Polygon[86]}",
+    "FIR Bremen 132.650 [C] (FL100 → FL245) {Polygon[272]}",
+    "FIR Bremen 119.825 [C] (FL100 → FL245) {Polygon[104]}",
+    "FIR Langen 129.875 [C] (FL100 → FL245) {Polygon[397]}",
+    "FIR Muenchen 126.950 [C] (FL100 → FL245) {Polygon[96]}",
+    "FIR Muenchen 125.800 [C] (FL100 → FL245) {Polygon[708]}",
+    "FIR Muenchen 120.650 [C] (FL100 → FL245) {Polygon[247]}",
+    "FIR Langen 123.525 [C] (FL100 → FL245) {Polygon[420]}",
+    "FIR Langen 128.950 [C] (FL100 → FL245) {Polygon[142]}",
+    "FIR Zuerich 124.700 [C] (FL100 → FL245) {Polygon[254]}",
+    "Alpine Area 126.950 [C] (FL130 → FL660) {Polygon[144]}",
+]

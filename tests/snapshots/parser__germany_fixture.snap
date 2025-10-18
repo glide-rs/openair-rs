@@ -1,0 +1,23 @@
+---
+source: tests/parser.rs
+expression: spaces.first().unwrap()
+---
+Airspace {
+    name: "ED-R LINDENBERG",
+    class: Restricted,
+    type_: None,
+    lower_bound: Gnd,
+    upper_bound: FeetAmsl(
+        5500,
+    ),
+    geom: Circle {
+        centerpoint: Coord {
+            lat: 52.20916666666667,
+            lng: 14.120277777777778,
+        },
+        radius: 1.3,
+    },
+    frequency: None,
+    call_sign: None,
+    transponder_code: None,
+}
