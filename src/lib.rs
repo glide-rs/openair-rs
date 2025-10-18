@@ -23,8 +23,6 @@
 //!
 //! Note: AT records (label placement hints) are currently ignored
 #![deny(clippy::all)]
-#![allow(clippy::many_single_char_names)]
-#![allow(clippy::non_ascii_literal)]
 
 use std::fmt;
 use std::io::BufRead;
@@ -139,7 +137,6 @@ impl fmt::Display for Altitude {
 }
 
 impl Altitude {
-    #[allow(clippy::cast_possible_truncation)]
     fn m2ft(val: i32) -> Result<i32, &'static str> {
         if val > 654_553_015 {
             return Err("m2ft out of bounds (too large)");
@@ -237,7 +234,6 @@ impl Coord {
         val.and_then(|v| v.parse::<u16>().ok()).ok_or(())
     }
 
-    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // Impossible, since the RegEx limits length
     fn parse_component(val: &str) -> Result<f64, ()> {
         // Split by colon to separate degrees, minutes, and seconds
         let mut colon_parts = val.split(':');
@@ -761,7 +757,6 @@ mod tests {
         use super::*;
 
         #[test]
-        #[allow(clippy::unreadable_literal)]
         fn parse_valid() {
             // With spaces
             assert_eq!(
