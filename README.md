@@ -1,6 +1,6 @@
 # openair-rs
 
-[![CI](https://github.com/dbrgn/openair-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/dbrgn/openair-rs/actions/workflows/ci.yml)
+[![CI](https://github.com/glide-rs/openair-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/glide-rs/openair-rs/actions/workflows/ci.yml)
 [![Docs][docs-badge]][docs]
 
 A Rust parser for airspace files in OpenAir format (used by flight instruments
