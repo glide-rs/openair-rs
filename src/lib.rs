@@ -24,14 +24,10 @@
 //! Note: AT records (label placement hints) are currently ignored
 #![deny(clippy::all)]
 
-use std::fmt;
-use std::io::BufRead;
-use std::mem;
-use std::sync::LazyLock;
+use std::{fmt, io::BufRead, mem, sync::LazyLock};
 
 use log::{debug, trace};
 use regex::Regex;
-
 #[cfg(feature = "serde")]
 use serde::Serialize;
 
