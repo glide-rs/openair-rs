@@ -16,9 +16,18 @@ Possible log types:
 
 - ...
 
+### v0.4.0 (2025-10-18)
+
+- [added] Add support for AC UNC (Unclassified) (#19)
+- [added] Add support for AX transponder code extension records (#13)
+- [changed] Ignore unknown A* extension records (#20)
+- [changed] Drop `lazy_static` dependency (#16)
+- [fixed] Add missing pub keywords to public structs (#15)
+- [fixed] Fix `Coord::parse_component()` to correctly parse DDM format (#17)
+
 ### v0.3.2 (2024-10-12)
 
-- [fix] Keep serializing `Class::Ctr` as `CTR`
+- [fixed] Keep serializing `Class::Ctr` as `CTR`
 
 ### v0.3.1 (2024-10-12)
 
