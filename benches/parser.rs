@@ -1,5 +1,6 @@
-use criterion::{criterion_group, criterion_main, Criterion};
 use std::io::Cursor;
+
+use criterion::{criterion_group, criterion_main, Criterion};
 
 fn parser_benchmark(c: &mut Criterion) {
     let fixtures: [(&str, &[u8]); _] = [(
