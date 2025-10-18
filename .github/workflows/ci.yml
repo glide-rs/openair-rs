@@ -1,6 +1,8 @@
 on:
   workflow_call:
   pull_request:
+  push:
+    branches: [master, main]
 
 name: CI
 
