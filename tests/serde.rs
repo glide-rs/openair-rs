@@ -37,6 +37,7 @@ fn serialize_json() {
         frequency: None,
         call_sign: None,
         transponder_code: None,
+        activation_times: None,
     };
     assert_json_snapshot!(airspace);
 }
@@ -53,6 +54,7 @@ fn serialize_json_ctr() {
         frequency: None,
         call_sign: None,
         transponder_code: None,
+        activation_times: None,
     };
     assert_json_snapshot!(airspace);
 }
