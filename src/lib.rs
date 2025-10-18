@@ -239,16 +239,38 @@ impl Coord {
 
     #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // Impossible, since the RegEx limits length
     fn parse_component(val: &str) -> Result<f64, ()> {
-        let mut parts = val.split([':', '.']);
-        let deg = Self::parse_number_opt(parts.next())?;
-        let min = Self::parse_number_opt(parts.next())?;
-        let sec = Self::parse_number_opt(parts.next())?;
-        let mut total = f64::from(deg) + f64::from(min) / 60.0 + f64::from(sec) / 3600.0;
-        if let Some(fractional) = parts.next() {
-            let frac = fractional.parse::<u16>().map_err(|_| ())?;
-            total += f64::from(frac) / 10_f64.powi(fractional.len() as i32) / 3600.0
+        // Split by colon to separate degrees, minutes, and seconds
+        let mut colon_parts = val.split(':');
+        let deg = Self::parse_number_opt(colon_parts.next())?;
+
+        // Get the minutes (decimal in DDM format or integer in DMS format)
+        let raw_minutes = colon_parts.next().ok_or(())?;
+
+        // Check if there's a third part (seconds in DMS format)
+        //
+        // See <https://github.com/naviter/seeyou_file_formats/blob/v2.1.2/OpenAir_File_Format_Support.md#geographic-position>
+        if let Some(sec_part) = colon_parts.next() {
+            // DMS format: DD:MM:SS or DD:MM:SS.fff
+            let min = Self::parse_number_opt(Some(raw_minutes))?;
+            let mut dot_parts = sec_part.split('.');
+            let sec = Self::parse_number_opt(dot_parts.next())?;
+            let mut total = f64::from(deg) + f64::from(min) / 60.0 + f64::from(sec) / 3600.0;
+
+            // Handle fractional seconds if present
+            if let Some(fractional) = dot_parts.next() {
+                let frac = fractional.parse::<u16>().map_err(|_| ())?;
+                total += f64::from(frac) / 10_f64.powi(fractional.len() as i32) / 3600.0;
+            }
+            Ok(total)
+        } else if raw_minutes.contains('.') {
+            // DDM format: DD:MM.mmm
+            let decimal_minutes = raw_minutes.parse::<f64>().map_err(|_| ())?;
+            let total = f64::from(deg) + decimal_minutes / 60.0;
+            Ok(total)
+        } else {
+            // Invalid format
+            Err(())
         }
-        Ok(total)
     }
 
     fn multiplier_lat(val: &str) -> Result<f64, ()> {
@@ -758,12 +780,12 @@ mod tests {
                 })
             );
 
-            // Dot between min and sec
+            // DDM format (degrees and decimal minutes)
             assert_eq!(
                 Coord::parse("46:51.44 N 009:19.42 E"),
                 Ok(Coord {
-                    lat: 46.86222222222222,
-                    lng: 9.328333333333333
+                    lat: 46.85733333333334,
+                    lng: 9.323666666666666
                 })
             );
 
