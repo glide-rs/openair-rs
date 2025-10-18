@@ -27,7 +27,7 @@ fn main() -> std::io::Result<()> {
     let airspaces = parse(&mut reader).unwrap_or_else(|e| fail!(e));
     println!("Airspaces:");
     for airspace in airspaces {
-        println!("- {}", airspace);
+        println!("- {airspace}");
     }
     println!("Done.");
 

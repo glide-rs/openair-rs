@@ -76,7 +76,7 @@ pub enum Class {
 
 impl fmt::Display for Class {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -98,7 +98,7 @@ impl Class {
             "W" => Ok(Self::WaveWindow),
             "RMZ" => Ok(Self::RadioMandatoryZone),
             "TMZ" => Ok(Self::TransponderMandatoryZone),
-            other => Err(format!("Invalid class: {}", other)),
+            other => Err(format!("Invalid class: {other}")),
         }
     }
 }
@@ -126,11 +126,11 @@ impl fmt::Display for Altitude {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Gnd => write!(f, "GND"),
-            Self::FeetAmsl(ft) => write!(f, "{} ft AMSL", ft),
-            Self::FeetAgl(ft) => write!(f, "{} ft AGL", ft),
-            Self::FlightLevel(ft) => write!(f, "FL{}", ft),
+            Self::FeetAmsl(ft) => write!(f, "{ft} ft AMSL"),
+            Self::FeetAgl(ft) => write!(f, "{ft} ft AGL"),
+            Self::FlightLevel(ft) => write!(f, "FL{ft}"),
             Self::Unlimited => write!(f, "Unlimited"),
-            Self::Other(val) => write!(f, "?({})", val),
+            Self::Other(val) => write!(f, "?({val})"),
         }
     }
 }
@@ -159,7 +159,7 @@ impl Altitude {
             fl if fl.starts_with("fl") || fl.starts_with("Fl") || fl.starts_with("FL") => {
                 match fl[2..].trim().parse::<u16>() {
                     Ok(val) => Ok(Self::FlightLevel(val)),
-                    Err(_) => Err(format!("Invalid altitude: {}", fl)),
+                    Err(_) => Err(format!("Invalid altitude: {fl}")),
                 }
             }
             other => {
@@ -214,7 +214,7 @@ impl Direction {
         match data {
             "+" => Ok(Self::Cw),
             "-" => Ok(Self::Ccw),
-            _ => Err(format!("Invalid direction: {}", data)),
+            _ => Err(format!("Invalid direction: {data}")),
         }
     }
 }
@@ -277,10 +277,10 @@ impl Coord {
             )
             .unwrap();
         }
-        let invalid = |_| format!("Invalid coord: \"{}\"", data);
+        let invalid = |_| format!("Invalid coord: \"{data}\"");
         let cap = RE
             .captures(data)
-            .ok_or_else(|| format!("Invalid coord: \"{}\"", data))?;
+            .ok_or_else(|| format!("Invalid coord: \"{data}\""))?;
         let lat = Self::multiplier_lat(&cap[3]).map_err(invalid)?
             * Self::parse_component(&cap[1]).map_err(invalid)?;
         let lng = Self::multiplier_lng(&cap[6]).map_err(invalid)?
@@ -305,16 +305,16 @@ impl ArcSegment {
     /// Return the angle if it's in the range 0..360, or an error otherwise.
     fn validate_angle(val: f32) -> Result<f32, String> {
         if val > 360.0 {
-            return Err(format!("Angle {} too large", val));
+            return Err(format!("Angle {val} too large"));
         }
         if val < 0.0 {
-            return Err(format!("Angle {} is negative", val));
+            return Err(format!("Angle {val} is negative"));
         }
         Ok(val)
     }
 
     fn parse(data: &str, centerpoint: Coord, direction: Direction) -> Result<Self, String> {
-        let errmsg = || format!("Invalid arc segment data: {}", data);
+        let errmsg = || format!("Invalid arc segment data: {data}");
         let parts: Vec<f32> = data
             .split(',')
             .map(str::trim)
@@ -346,7 +346,7 @@ pub struct Arc {
 
 impl Arc {
     fn parse(data: &str, centerpoint: Coord, direction: Direction) -> Result<Self, String> {
-        let errmsg = || format!("Invalid arc data: {}", data);
+        let errmsg = || format!("Invalid arc data: {data}");
         let parts: Vec<Coord> = data
             .split(',')
             .map(str::trim)
@@ -398,7 +398,7 @@ impl fmt::Display for Geometry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Polygon { segments } => write!(f, "Polygon[{}]", segments.len()),
-            Self::Circle { radius, .. } => write!(f, "Circle[r={}NM]", radius),
+            Self::Circle { radius, .. } => write!(f, "Circle[r={radius}NM]"),
         }
     }
 }
@@ -550,16 +550,16 @@ impl AirspaceBuilder {
         let name = self.name.ok_or("Missing name")?;
         let class = self
             .class
-            .ok_or_else(|| format!("Missing class for '{}'", name))?;
+            .ok_or_else(|| format!("Missing class for '{name}'"))?;
         let lower_bound = self
             .lower_bound
-            .ok_or_else(|| format!("Missing lower bound for '{}'", name))?;
+            .ok_or_else(|| format!("Missing lower bound for '{name}'"))?;
         let upper_bound = self
             .upper_bound
-            .ok_or_else(|| format!("Missing upper bound for '{}'", name))?;
+            .ok_or_else(|| format!("Missing upper bound for '{name}'"))?;
         let geom = self
             .geom
-            .ok_or_else(|| format!("Missing geom for '{}'", name))?;
+            .ok_or_else(|| format!("Missing geom for '{name}'"))?;
         Ok(Airspace {
             name,
             class,
@@ -650,7 +650,7 @@ fn process(builder: &mut AirspaceBuilder, line: &str) -> Result<(), String> {
             trace!("-> Found circle radius");
             let radius = data
                 .parse::<f32>()
-                .map_err(|_| format!("Invalid radius: {}", data))?;
+                .map_err(|_| format!("Invalid radius: {data}"))?;
             builder.set_circle_radius(radius)?;
         }
         ('D', 'A') => {
@@ -667,7 +667,7 @@ fn process(builder: &mut AirspaceBuilder, line: &str) -> Result<(), String> {
             let arc = Arc::parse(data, centerpoint, direction)?;
             builder.add_segment(PolygonSegment::Arc(arc))?;
         }
-        (t1, t2) => return Err(format!("Parse error (unexpected \"{:1}{:1}\")", t1, t2)),
+        (t1, t2) => return Err(format!("Parse error (unexpected \"{t1:1}{t2:1}\")")),
     }
     Ok(())
 }
@@ -683,7 +683,7 @@ pub fn parse<R: BufRead>(reader: &mut R) -> Result<Vec<Airspace>, String> {
         buf.clear();
         let bytes_read = reader
             .read_until(0x0a /*\n*/, &mut buf)
-            .map_err(|e| format!("Could not read line: {}", e))?;
+            .map_err(|e| format!("Could not read line: {e}"))?;
         if bytes_read == 0 {
             // EOF
             trace!("Reached EOF");

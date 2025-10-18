@@ -1,0 +1,41 @@
+on:
+  workflow_call:
+  pull_request:
+
+name: CI
+
+jobs:
+  build_and_test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - name: Run check
+        run: cargo check --all-features
+      - name: Run tests (default features)
+        run: cargo test
+      - name: Run tests (with serde)
+        run: cargo test --features serde
+      - name: Run example
+        run: cargo run --example parse_file example_data/Switzerland.txt
+
+  clippy:
+    name: Run clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  rustfmt:
+    name: Check code formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          components: rustfmt
+      - run: cargo fmt -- --check
