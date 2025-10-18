@@ -13,6 +13,7 @@ fn parser_benchmark(c: &mut Criterion) {
             "Germany_Border",
             include_bytes!("../example_data/Germany_Border.txt"),
         ),
+        ("France", include_bytes!("../example_data/France.txt")),
     ];
 
     for (id, bytes) in fixtures {
