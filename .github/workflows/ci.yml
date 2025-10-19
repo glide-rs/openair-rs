@@ -12,7 +12,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.88.0
       - name: Run check
         run: cargo check --all-features
       - name: Run tests (default features)
@@ -27,9 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+      - run: rustup component add clippy
       - run: cargo clippy --all-targets --all-features -- -D warnings
 
   rustfmt:
@@ -41,4 +38,4 @@ jobs:
         with:
           toolchain: nightly-2025-10-18
           components: rustfmt
-      - run: cargo fmt -- --check
+      - run: cargo +nightly-2025-10-18 fmt -- --check
