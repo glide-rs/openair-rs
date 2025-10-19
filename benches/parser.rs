@@ -3,10 +3,18 @@ use std::io::Cursor;
 use criterion::{criterion_group, criterion_main, Criterion};
 
 fn parser_benchmark(c: &mut Criterion) {
-    let fixtures: [(&str, &[u8]); _] = [(
-        "Switzerland",
-        include_bytes!("../example_data/Switzerland.txt"),
-    )];
+    let fixtures: [(&str, &[u8]); _] = [
+        (
+            "Switzerland",
+            include_bytes!("../example_data/Switzerland.txt"),
+        ),
+        ("Germany", include_bytes!("../example_data/Germany.txt")),
+        (
+            "Germany_Border",
+            include_bytes!("../example_data/Germany_Border.txt"),
+        ),
+        ("France", include_bytes!("../example_data/France.txt")),
+    ];
 
     for (id, bytes) in fixtures {
         c.bench_function(id, |b| {
