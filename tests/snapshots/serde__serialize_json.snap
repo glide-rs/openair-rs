@@ -1,0 +1,62 @@
+---
+source: tests/serde.rs
+expression: airspace
+---
+{
+  "name": "SUPERSPACE",
+  "class": "Prohibited",
+  "lowerBound": {
+    "type": "Gnd"
+  },
+  "upperBound": {
+    "type": "FeetAgl",
+    "val": 3000
+  },
+  "geom": {
+    "type": "Polygon",
+    "segments": [
+      {
+        "type": "Point",
+        "lat": 1.0,
+        "lng": 2.0
+      },
+      {
+        "type": "Point",
+        "lat": 1.1,
+        "lng": 2.0
+      },
+      {
+        "type": "Arc",
+        "centerpoint": {
+          "lat": 1.05,
+          "lng": 2.05
+        },
+        "start": {
+          "lat": 1.1,
+          "lng": 2.0
+        },
+        "end": {
+          "lat": 1.0,
+          "lng": 2.1
+        },
+        "direction": "cw"
+      },
+      {
+        "type": "ArcSegment",
+        "centerpoint": {
+          "lat": 3.0,
+          "lng": 3.0
+        },
+        "radius": 1.5,
+        "angleStart": 30.0,
+        "angleEnd": 45.0,
+        "direction": "ccw"
+      },
+      {
+        "type": "Point",
+        "lat": 1.0,
+        "lng": 2.0
+      }
+    ]
+  }
+}
