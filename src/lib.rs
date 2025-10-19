@@ -165,7 +165,7 @@ impl AirspaceBuilder {
                     segments: vec![segment],
                 })
             }
-            Some(Geometry::Polygon { ref mut segments }) => {
+            Some(Geometry::Polygon { segments }) => {
                 segments.push(segment);
             }
             Some(Geometry::Circle { .. }) => {
