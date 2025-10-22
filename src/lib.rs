@@ -29,6 +29,7 @@ mod altitude;
 mod classes;
 mod coords;
 mod geometry;
+mod record;
 
 use std::{fmt, io::BufRead, mem};
 
@@ -36,6 +37,7 @@ use log::{debug, trace};
 #[cfg(feature = "serde")]
 use serde::Serialize;
 
+use crate::record::Record;
 pub use crate::{
     activations::ActivationTimes,
     altitude::Altitude,
@@ -233,114 +235,81 @@ impl AirspaceBuilder {
     }
 }
 
-/// Return whether this line contains the start of a new airspace.
-#[inline]
-fn starts_airspace(line: &str) -> bool {
-    line.starts_with("AC ")
-}
-
-/// Process a line.
-fn process(builder: &mut AirspaceBuilder, line: &str) -> Result<(), String> {
-    if line.trim().is_empty() {
-        trace!("Empty line, ignoring");
-        return Ok(());
-    }
-
-    let mut chars = line.chars().filter(|c: &char| !c.is_ascii_whitespace());
-    let t1 = chars.next().ok_or_else(|| "Line too short".to_string())?;
-    let t2 = chars.next().unwrap_or(' ');
-    let data = line.split_once(' ').map(|x| x.1).unwrap_or("").trim();
-
-    trace!("Input: \"{:1}{:1}\"", t1, t2);
-    match (t1, t2) {
-        ('*', _) => trace!("-> Comment, ignore"),
-        ('A', 'C') => {
-            // Airspace class
-            let class = Class::parse(data)?;
-            trace!("-> Found class: {}", class);
+/// Process a record.
+fn process(builder: &mut AirspaceBuilder, record: Record) -> Result<(), String> {
+    match record {
+        Record::Empty => {}
+        Record::Comment => {}
+        Record::LabelPlacement => {}
+        Record::Pen => {}
+        Record::Brush => {}
+        Record::UnknownExtension(_) => {}
+        Record::AirspaceClass(class) => {
             builder.set_class(class)?;
         }
-        ('A', 'N') => {
-            trace!("-> Found name: {}", data);
-            builder.set_name(data.to_string())?;
+        Record::AirspaceName(name) => {
+            builder.set_name(name.to_string())?;
         }
-        ('A', 'L') => {
-            let altitude = Altitude::parse(data)?;
-            trace!("-> Found lower bound: {}", altitude);
+        Record::LowerBound(altitude) => {
             builder.set_lower_bound(altitude)?;
         }
-        ('A', 'H') => {
-            let altitude = Altitude::parse(data)?;
-            trace!("-> Found upper bound: {}", altitude);
+        Record::UpperBound(altitude) => {
             builder.set_upper_bound(altitude)?;
         }
-        ('A', 'T') => {
-            trace!("-> Label placement hint, ignore");
+        Record::AirspaceType(type_) => {
+            builder.set_type(type_.to_string())?;
         }
-        ('A', 'Y') => {
-            trace!("-> Found type: {}", data);
-            builder.set_type(data.to_string())?;
+        Record::Frequency(frequency) => {
+            builder.set_frequency(frequency.to_string())?;
         }
-        ('A', 'F') => {
-            trace!("-> Found frequency: {}", data);
-            builder.set_frequency(data.to_string())?;
+        Record::CallSign(call_sign) => {
+            builder.set_call_sign(call_sign.to_string())?;
         }
-        ('A', 'G') => {
-            trace!("-> Found call sign: {}", data);
-            builder.set_call_sign(data.to_string())?;
+        Record::TransponderCode(code) => {
+            builder.set_transponder_code(code)?;
         }
-        ('A', 'X') => {
-            let transponder_code = data
-                .parse()
-                .map_err(|_| format!("Invalid transponder code: {}", data))?;
-            trace!("-> Found transponder code: {}", transponder_code);
-            builder.set_transponder_code(transponder_code)?;
-        }
-        ('A', 'A') => {
-            let activation_times = data.parse()?;
-            trace!("-> Found activation times: {:?}", activation_times);
+        Record::ActivationTimes(activation_times) => {
             builder.set_activation_times(activation_times)?;
         }
-        ('A', _) => trace!("-> Found unknown extension record: {}", line),
-        ('S', 'P') => trace!("-> Pen, ignore"),
-        ('S', 'B') => trace!("-> Brush, ignore"),
-        ('V', 'X') => {
-            trace!("-> Found X variable");
-            let coord = Coord::parse(data.get(2..).unwrap_or(""))?;
+        Record::VarX(coord) => {
             builder.set_var_x(coord);
         }
-        ('V', 'D') => {
-            trace!("-> Found D variable");
-            let direction = Direction::parse(data.get(2..).unwrap_or(""))?;
+        Record::VarD(direction) => {
             builder.set_var_d(direction);
         }
-        ('D', 'P') => {
-            trace!("-> Found point");
-            let coord = Coord::parse(data)?;
+        Record::Point(coord) => {
             builder.add_segment(PolygonSegment::Point(coord))?;
         }
-        ('D', 'C') => {
-            trace!("-> Found circle radius");
-            let radius = data
-                .parse::<f32>()
-                .map_err(|_| format!("Invalid radius: {data}"))?;
+        Record::CircleRadius(radius) => {
             builder.set_circle_radius(radius)?;
         }
-        ('D', 'A') => {
-            trace!("-> Found arc segment");
+        Record::ArcSegmentData {
+            radius,
+            angle_start,
+            angle_end,
+        } => {
             let centerpoint = builder.var_x.clone().ok_or("Centerpoint missing")?;
             let direction = builder.var_d.unwrap_or_default();
-            let arc_segment = ArcSegment::parse(data, centerpoint, direction)?;
+            let arc_segment = ArcSegment {
+                centerpoint,
+                radius,
+                angle_start,
+                angle_end,
+                direction,
+            };
             builder.add_segment(PolygonSegment::ArcSegment(arc_segment))?;
         }
-        ('D', 'B') => {
-            trace!("-> Found arc");
+        Record::ArcData { start, end } => {
             let centerpoint = builder.var_x.clone().ok_or("Centerpoint missing")?;
             let direction = builder.var_d.unwrap_or_default();
-            let arc = Arc::parse(data, centerpoint, direction)?;
+            let arc = Arc {
+                centerpoint,
+                start,
+                end,
+                direction,
+            };
             builder.add_segment(PolygonSegment::Arc(arc))?;
         }
-        (t1, t2) => return Err(format!("Parse error (unexpected \"{t1:1}{t2:1}\")")),
     }
     Ok(())
 }
@@ -365,11 +334,14 @@ pub fn parse<R: BufRead>(reader: &mut R) -> Result<Vec<Airspace>, String> {
         }
         let line = String::from_utf8_lossy(&buf);
 
-        // Trim BOM and whitespace
-        let trimmed_line = line.trim_start_matches('\u{feff}').trim();
+        // Trim BOM
+        let trimmed_line = line.trim_start_matches('\u{feff}');
+
+        // Parse the record
+        let record = Record::parse(trimmed_line)?;
 
         // Determine whether we reached the start of a new airspace
-        let start_of_airspace = starts_airspace(trimmed_line);
+        let start_of_airspace = matches!(record, Record::AirspaceClass(_));
 
         // A new airspace starts, collect the old one first
         if start_of_airspace && !builder.new {
@@ -377,7 +349,7 @@ pub fn parse<R: BufRead>(reader: &mut R) -> Result<Vec<Airspace>, String> {
             airspaces.push(old_builder.finish()?);
         }
 
-        // Process current line
-        process(&mut builder, trimmed_line)?;
+        // Process current record
+        process(&mut builder, record)?;
     }
 }
