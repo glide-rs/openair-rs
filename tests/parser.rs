@@ -47,6 +47,7 @@ fn test_france_fixture() {
 
     let spaces = parse(&mut cursor).unwrap();
     assert_debug_snapshot!(spaces.first().unwrap());
+    assert_debug_snapshot!(spaces.last().unwrap());
 
     let names = spaces.iter().map(|a| a.to_string()).collect::<Vec<_>>();
     assert_debug_snapshot!(names);

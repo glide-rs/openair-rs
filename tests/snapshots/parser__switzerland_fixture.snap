@@ -227,4 +227,5 @@ Airspace {
     frequency: None,
     call_sign: None,
     transponder_code: None,
+    activation_times: None,
 }

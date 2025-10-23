@@ -15,7 +15,11 @@ edition = "2024"
 name = "parser"
 harness = false
 
+[features]
+serde = ["dep:serde", "iso8601/serde"]
+
 [dependencies]
+iso8601 = "0.6"
 log = "0.4"
 regex = "1"
 serde = { version = "1", optional = true, features = ["derive"] }

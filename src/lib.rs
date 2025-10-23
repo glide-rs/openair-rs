@@ -24,6 +24,7 @@
 //! Note: AT records (label placement hints) are currently ignored
 #![deny(clippy::all)]
 
+mod activations;
 mod altitude;
 mod classes;
 mod coords;
@@ -36,6 +37,7 @@ use log::{debug, trace};
 use serde::Serialize;
 
 pub use crate::{
+    activations::ActivationTimes,
     altitude::Altitude,
     classes::Class,
     coords::Coord,
@@ -71,6 +73,9 @@ pub struct Airspace {
     /// Transponder code associated with this airspace
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub transponder_code: Option<u16>,
+    /// Airspace activation times
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
+    pub activation_times: Option<ActivationTimes>,
 }
 
 impl fmt::Display for Airspace {
@@ -99,6 +104,7 @@ struct AirspaceBuilder {
     frequency: Option<String>,
     call_sign: Option<String>,
     transponder_code: Option<u16>,
+    activation_times: Option<ActivationTimes>,
 
     // Variables
     var_x: Option<Coord>,
@@ -141,6 +147,7 @@ impl AirspaceBuilder {
             frequency: None,
             call_sign: None,
             transponder_code: None,
+            activation_times: None,
             var_x: None,
             var_d: None,
         }
@@ -154,6 +161,12 @@ impl AirspaceBuilder {
     setter!(ONCE, set_frequency, frequency, String);
     setter!(ONCE, set_call_sign, call_sign, String);
     setter!(ONCE, set_transponder_code, transponder_code, u16);
+    setter!(
+        ONCE,
+        set_activation_times,
+        activation_times,
+        ActivationTimes
+    );
     setter!(MANY, set_var_x, var_x, Coord);
     setter!(MANY, set_var_d, var_d, Direction);
 
@@ -215,6 +228,7 @@ impl AirspaceBuilder {
             frequency: self.frequency,
             call_sign: self.call_sign,
             transponder_code: self.transponder_code,
+            activation_times: self.activation_times,
         })
     }
 }
@@ -281,6 +295,11 @@ fn process(builder: &mut AirspaceBuilder, line: &str) -> Result<(), String> {
                 .map_err(|_| format!("Invalid transponder code: {}", data))?;
             trace!("-> Found transponder code: {}", transponder_code);
             builder.set_transponder_code(transponder_code)?;
+        }
+        ('A', 'A') => {
+            let activation_times = data.parse()?;
+            trace!("-> Found activation times: {:?}", activation_times);
+            builder.set_activation_times(activation_times)?;
         }
         ('A', _) => trace!("-> Found unknown extension record: {}", line),
         ('S', 'P') => trace!("-> Pen, ignore"),
