@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{io::Write, str::FromStr};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
@@ -14,6 +14,16 @@ impl ActivationTimes {
 
     pub fn none() -> Self {
         Self::new(None, None)
+    }
+
+    /// Writes the activation times in OpenAir format.
+    pub fn write<W: Write>(&self, mut writer: W) -> std::io::Result<()> {
+        match (self.start, self.end) {
+            (None, None) => write!(writer, "NONE"),
+            (Some(start), None) => write!(writer, "{start}/NONE"),
+            (None, Some(end)) => write!(writer, "NONE/{end}"),
+            (Some(start), Some(end)) => write!(writer, "{start}/{end}"),
+        }
     }
 }
 
@@ -184,5 +194,41 @@ mod tests {
             end: None,
         }
         ");
+    }
+
+    fn write_activation_times(times: &ActivationTimes) -> String {
+        let mut buf = Vec::new();
+        times.write(&mut buf).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[test]
+    fn write() {
+        // Full range
+        let times = "2023-12-16T12:00Z/2023-12-16T13:00Z"
+            .parse::<ActivationTimes>()
+            .unwrap();
+        assert_eq!(
+            write_activation_times(&times),
+            "2023-12-16T12:00:00.0+00:00/2023-12-16T13:00:00.0+00:00"
+        );
+
+        // Start only
+        let times = "2024-12-17T00:00Z/NONE".parse::<ActivationTimes>().unwrap();
+        assert_eq!(
+            write_activation_times(&times),
+            "2024-12-17T00:00:00.0+00:00/NONE"
+        );
+
+        // End only
+        let times = "NONE/2024-12-18T00:00Z".parse::<ActivationTimes>().unwrap();
+        assert_eq!(
+            write_activation_times(&times),
+            "NONE/2024-12-18T00:00:00.0+00:00"
+        );
+
+        // None
+        let times = "NONE".parse::<ActivationTimes>().unwrap();
+        assert_eq!(write_activation_times(&times), "NONE");
     }
 }
