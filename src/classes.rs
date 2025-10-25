@@ -1,7 +1,7 @@
 use std::fmt;
 
 /// Airspace class.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum Class {
     /// Airspace A
