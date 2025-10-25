@@ -3,7 +3,7 @@ use std::{fmt, io::Write, sync::LazyLock};
 use regex::Regex;
 
 /// Altitude, either ground or a certain height AMSL in feet.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(tag = "type", content = "val"))]
 pub enum Altitude {
