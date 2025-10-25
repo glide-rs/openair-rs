@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use log::trace;
 
 use crate::{
@@ -59,6 +61,69 @@ pub enum Record<'a> {
 }
 
 impl<'a> Record<'a> {
+    /// Writes the record in OpenAir format with CRLF line ending.
+    pub fn write<W: Write>(self, mut writer: W) -> std::io::Result<()> {
+        match self {
+            Record::AirspaceClass(class) => write!(writer, "AC {}\r\n", class.to_str()),
+            Record::AirspaceType(ty) => write!(writer, "AY {ty}\r\n"),
+            Record::AirspaceName(name) => write!(writer, "AN {name}\r\n"),
+            Record::LowerBound(alt) => {
+                write!(writer, "AL ")?;
+                alt.write(&mut writer)?;
+                write!(writer, "\r\n")
+            }
+            Record::UpperBound(alt) => {
+                write!(writer, "AH ")?;
+                alt.write(&mut writer)?;
+                write!(writer, "\r\n")
+            }
+            Record::Frequency(freq) => write!(writer, "AF {freq}\r\n"),
+            Record::CallSign(sign) => write!(writer, "AG {sign}\r\n"),
+            Record::TransponderCode(code) => write!(writer, "AX {code}\r\n"),
+            Record::ActivationTimes(times) => {
+                write!(writer, "AA ")?;
+                times.write(&mut writer)?;
+                write!(writer, "\r\n")
+            }
+            Record::UnknownExtension(ext) => write!(writer, "{ext}\r\n"),
+            Record::VarX(coord) => {
+                write!(writer, "V X=")?;
+                coord.write(&mut writer)?;
+                write!(writer, "\r\n")
+            }
+            Record::VarD(direction) => {
+                let dir_str = match direction {
+                    Direction::Cw => "+",
+                    Direction::Ccw => "-",
+                };
+                write!(writer, "V D={dir_str}\r\n")
+            }
+            Record::Point(coord) => {
+                write!(writer, "DP ")?;
+                coord.write(&mut writer)?;
+                write!(writer, "\r\n")
+            }
+            Record::CircleRadius(radius) => write!(writer, "DC {radius}\r\n"),
+            Record::ArcSegmentData {
+                radius,
+                angle_start,
+                angle_end,
+            } => write!(writer, "DA {radius}, {angle_start}, {angle_end}\r\n"),
+            Record::ArcData { start, end } => {
+                write!(writer, "DB ")?;
+                start.write(&mut writer)?;
+                write!(writer, ", ")?;
+                end.write(&mut writer)?;
+                write!(writer, "\r\n")
+            }
+            Record::Empty => write!(writer, "\r\n"),
+            Record::Comment | Record::LabelPlacement | Record::Pen | Record::Brush => {
+                // These records are ignored when writing
+                Ok(())
+            }
+        }
+    }
+
     pub fn parse(line: &'a str) -> Result<Self, String> {
         let trimmed = line.trim();
 
@@ -254,5 +319,153 @@ mod tests {
             Record::parse("DA 10,270,-10"),
             @r#"Err("Angle -10 is negative")"#,
         );
+    }
+
+    fn write_record(record: Record) -> String {
+        let mut buf = Vec::new();
+        record.write(&mut buf).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[test]
+    fn write_airspace_class() {
+        assert_eq!(write_record(Record::AirspaceClass(Class::A)), "AC A\r\n");
+        assert_eq!(
+            write_record(Record::AirspaceClass(Class::Ctr)),
+            "AC CTR\r\n"
+        );
+    }
+
+    #[test]
+    fn write_airspace_type() {
+        assert_eq!(write_record(Record::AirspaceType("MATZ")), "AY MATZ\r\n");
+    }
+
+    #[test]
+    fn write_airspace_name() {
+        assert_eq!(
+            write_record(Record::AirspaceName("Test Zone")),
+            "AN Test Zone\r\n"
+        );
+    }
+
+    #[test]
+    fn write_bounds() {
+        assert_eq!(
+            write_record(Record::LowerBound(Altitude::Gnd)),
+            "AL GND\r\n"
+        );
+        assert_eq!(
+            write_record(Record::UpperBound(Altitude::FlightLevel(195))),
+            "AH FL195\r\n"
+        );
+    }
+
+    #[test]
+    fn write_frequency() {
+        assert_eq!(write_record(Record::Frequency("123.45")), "AF 123.45\r\n");
+    }
+
+    #[test]
+    fn write_call_sign() {
+        assert_eq!(write_record(Record::CallSign("TOWER")), "AG TOWER\r\n");
+    }
+
+    #[test]
+    fn write_transponder_code() {
+        assert_eq!(write_record(Record::TransponderCode(7000)), "AX 7000\r\n");
+    }
+
+    #[test]
+    fn write_activation_times() {
+        let times = "2023-12-16T12:00Z/2023-12-16T13:00Z".parse().unwrap();
+        assert_eq!(
+            write_record(Record::ActivationTimes(times)),
+            "AA 2023-12-16T12:00:00.0+00:00/2023-12-16T13:00:00.0+00:00\r\n"
+        );
+    }
+
+    #[test]
+    fn write_unknown_extension() {
+        assert_eq!(
+            write_record(Record::UnknownExtension("AZ custom data")),
+            "AZ custom data\r\n"
+        );
+    }
+
+    #[test]
+    fn write_var_x() {
+        let coord = Coord {
+            lat: 46.86222222222222,
+            lng: 9.328333333333333,
+        };
+        assert_eq!(
+            write_record(Record::VarX(coord)),
+            "V X=46:51:44 N 009:19:42 E\r\n"
+        );
+    }
+
+    #[test]
+    fn write_var_d() {
+        assert_eq!(write_record(Record::VarD(Direction::Cw)), "V D=+\r\n");
+        assert_eq!(write_record(Record::VarD(Direction::Ccw)), "V D=-\r\n");
+    }
+
+    #[test]
+    fn write_point() {
+        let coord = Coord {
+            lat: 46.86222222222222,
+            lng: 9.328333333333333,
+        };
+        assert_eq!(
+            write_record(Record::Point(coord)),
+            "DP 46:51:44 N 009:19:42 E\r\n"
+        );
+    }
+
+    #[test]
+    fn write_circle_radius() {
+        assert_eq!(write_record(Record::CircleRadius(5.0)), "DC 5\r\n");
+    }
+
+    #[test]
+    fn write_arc_segment_data() {
+        assert_eq!(
+            write_record(Record::ArcSegmentData {
+                radius: 10.0,
+                angle_start: 270.0,
+                angle_end: 290.0,
+            }),
+            "DA 10, 270, 290\r\n"
+        );
+    }
+
+    #[test]
+    fn write_arc_data() {
+        let start = Coord {
+            lat: 46.86222222222222,
+            lng: 9.328333333333333,
+        };
+        let end = Coord {
+            lat: 47.0,
+            lng: 9.5,
+        };
+        assert_eq!(
+            write_record(Record::ArcData { start, end }),
+            "DB 46:51:44 N 009:19:42 E, 47:00:00 N 009:30:00 E\r\n"
+        );
+    }
+
+    #[test]
+    fn write_empty() {
+        assert_eq!(write_record(Record::Empty), "\r\n");
+    }
+
+    #[test]
+    fn write_ignored_records() {
+        assert_eq!(write_record(Record::Comment), "");
+        assert_eq!(write_record(Record::LabelPlacement), "");
+        assert_eq!(write_record(Record::Pen), "");
+        assert_eq!(write_record(Record::Brush), "");
     }
 }
