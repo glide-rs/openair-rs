@@ -29,13 +29,15 @@ mod altitude;
 mod classes;
 mod coords;
 mod geometry;
+mod record;
 
-use std::{fmt, io::BufRead, mem};
+use std::{fmt, io::BufRead};
 
-use log::{debug, trace};
+use log::debug;
 #[cfg(feature = "serde")]
 use serde::Serialize;
 
+use crate::record::Record;
 pub use crate::{
     activations::ActivationTimes,
     altitude::Altitude,
@@ -88,296 +90,288 @@ impl fmt::Display for Airspace {
     }
 }
 
-/// An incomplete airspace.
-#[derive(Debug)]
-struct AirspaceBuilder {
-    // Base records
-    new: bool,
-    name: Option<String>,
-    class: Option<Class>,
-    lower_bound: Option<Altitude>,
-    upper_bound: Option<Altitude>,
-    geom: Option<Geometry>,
-
-    // Extension records
-    type_: Option<String>,
-    frequency: Option<String>,
-    call_sign: Option<String>,
-    transponder_code: Option<u16>,
-    activation_times: Option<ActivationTimes>,
-
-    // Variables
-    var_x: Option<Coord>,
-    var_d: Option<Direction>,
+struct OpenAirIterator<R: BufRead> {
+    reader: R,
+    line: Vec<u8>,
+    use_buffered_line: bool,
 }
 
-macro_rules! setter {
-    (ONCE, $method:ident, $field:ident, $type:ty) => {
-        fn $method(&mut self, $field: $type) -> Result<(), String> {
-            self.new = false;
-            if self.$field.is_some() {
-                Err(format!(
-                    "Could not set {} (already defined)",
-                    stringify!($field)
-                ))
-            } else {
-                self.$field = Some($field);
-                Ok(())
-            }
-        }
-    };
-    (MANY, $method:ident, $field:ident, $type:ty) => {
-        fn $method(&mut self, $field: $type) {
-            self.new = false;
-            self.$field = Some($field);
-        }
-    };
-}
+impl<R: BufRead> OpenAirIterator<R> {
+    fn new(mut reader: R) -> Self {
+        let mut line = Vec::new();
+        let result = reader.read_until(b'\n', &mut line);
+        let use_buffered_line = result.is_ok();
 
-impl AirspaceBuilder {
-    fn new() -> Self {
+        // Skip UTF8 byte-order-mark
+        if line.starts_with(&[0xEF, 0xBB, 0xBF]) {
+            line.drain(0..3);
+        }
+
         Self {
-            new: true,
-            name: None,
-            class: None,
-            lower_bound: None,
-            upper_bound: None,
-            geom: None,
-            type_: None,
-            frequency: None,
-            call_sign: None,
-            transponder_code: None,
-            activation_times: None,
-            var_x: None,
-            var_d: None,
+            reader,
+            line,
+            use_buffered_line,
         }
     }
 
-    setter!(ONCE, set_name, name, String);
-    setter!(ONCE, set_class, class, Class);
-    setter!(ONCE, set_lower_bound, lower_bound, Altitude);
-    setter!(ONCE, set_upper_bound, upper_bound, Altitude);
-    setter!(ONCE, set_type, type_, String);
-    setter!(ONCE, set_frequency, frequency, String);
-    setter!(ONCE, set_call_sign, call_sign, String);
-    setter!(ONCE, set_transponder_code, transponder_code, u16);
-    setter!(
-        ONCE,
-        set_activation_times,
-        activation_times,
-        ActivationTimes
-    );
-    setter!(MANY, set_var_x, var_x, Coord);
-    setter!(MANY, set_var_d, var_d, Direction);
+    fn next_airspace(&mut self) -> Result<Option<Airspace>, String> {
+        // Local variables for accumulating airspace data
+        let mut name: Option<String> = None;
+        let mut class: Option<Class> = None;
+        let mut lower_bound: Option<Altitude> = None;
+        let mut upper_bound: Option<Altitude> = None;
+        let mut geom: Option<Geometry> = None;
+        let mut type_: Option<String> = None;
+        let mut frequency: Option<String> = None;
+        let mut call_sign: Option<String> = None;
+        let mut transponder_code: Option<u16> = None;
+        let mut activation_times: Option<ActivationTimes> = None;
+        let mut var_x: Option<Coord> = None;
+        let mut var_d: Option<Direction> = None;
 
-    fn add_segment(&mut self, segment: PolygonSegment) -> Result<(), String> {
-        self.new = false;
-        match &mut self.geom {
-            None => {
-                self.geom = Some(Geometry::Polygon {
-                    segments: vec![segment],
-                })
-            }
-            Some(Geometry::Polygon { segments }) => {
-                segments.push(segment);
-            }
-            Some(Geometry::Circle { .. }) => {
-                return Err("Cannot add a point to a circle".into());
-            }
-        }
-        Ok(())
-    }
+        loop {
+            let reached_eof = if self.use_buffered_line {
+                // If we are supposed to use the buffered line, then we don't
+                // involve the `reader` and just reset the flag instead.
+                self.use_buffered_line = false;
+                // We also apparently still have a line to process, so we are
+                // not at the end of the file yet.
+                false
+            } else {
+                // Otherwise, we should read a new line from the `reader`
+                self.line.clear();
+                let result = self.reader.read_until(b'\n', &mut self.line);
+                let num_read = result.map_err(|e| format!("Could not read line: {e}"))?;
+                // ... and if we haven't read any bytes, then we have reached
+                // the end of the file.
+                num_read == 0
+            };
 
-    fn set_circle_radius(&mut self, radius: f32) -> Result<(), String> {
-        self.new = false;
-        match (&self.geom, &self.var_x) {
-            (None, Some(centerpoint)) => {
-                self.geom = Some(Geometry::Circle {
-                    centerpoint: centerpoint.clone(),
+            // If we reached the end of the file, but there was no pending
+            // airspace remaining, then we can "finish" the iterator.
+            if reached_eof {
+                // However, if we have accumulated an airspace, we should return it first
+                if let Some(class) = class {
+                    debug!("Finish {:?}", name);
+                    let name = name.ok_or("Missing name")?;
+                    let lower_bound =
+                        lower_bound.ok_or_else(|| format!("Missing lower bound for '{name}'"))?;
+                    let upper_bound =
+                        upper_bound.ok_or_else(|| format!("Missing upper bound for '{name}'"))?;
+                    let geom = geom.ok_or_else(|| format!("Missing geom for '{name}'"))?;
+                    return Ok(Some(Airspace {
+                        name,
+                        class,
+                        type_,
+                        lower_bound,
+                        upper_bound,
+                        geom,
+                        frequency,
+                        call_sign,
+                        transponder_code,
+                        activation_times,
+                    }));
+                }
+                return Ok(None);
+            }
+
+            // Parse the line as a Record
+            let line_str = String::from_utf8_lossy(&self.line);
+            let trimmed = line_str.trim_start_matches('\u{feff}');
+            let record = Record::parse(trimmed)?;
+
+            // If we see a new AirspaceClass record and we already have accumulated
+            // an airspace, we should return the current airspace first.
+            if matches!(record, Record::AirspaceClass(_))
+                && let Some(class) = class
+            {
+                // Mark the current line as not consumed yet so that we can
+                // reuse it in the `next()` iteration.
+                self.use_buffered_line = true;
+
+                // Build and return airspace from accumulated data
+                debug!("Finish {:?}", name);
+                let name = name.ok_or("Missing name")?;
+                let lower_bound =
+                    lower_bound.ok_or_else(|| format!("Missing lower bound for '{name}'"))?;
+                let upper_bound =
+                    upper_bound.ok_or_else(|| format!("Missing upper bound for '{name}'"))?;
+                let geom = geom.ok_or_else(|| format!("Missing geom for '{name}'"))?;
+                return Ok(Some(Airspace {
+                    name,
+                    class,
+                    type_,
+                    lower_bound,
+                    upper_bound,
+                    geom,
+                    frequency,
+                    call_sign,
+                    transponder_code,
+                    activation_times,
+                }));
+            }
+
+            // Process the record
+            match record {
+                Record::Empty => {}
+                Record::Comment => {}
+                Record::LabelPlacement => {}
+                Record::Pen => {}
+                Record::Brush => {}
+                Record::UnknownExtension(_) => {}
+                Record::AirspaceClass(parsed_class) => {
+                    if class.is_some() {
+                        return Err("Could not set class (already defined)".to_string());
+                    }
+                    class = Some(parsed_class);
+                }
+                Record::AirspaceName(parsed_name) => {
+                    if name.is_some() {
+                        return Err("Could not set name (already defined)".to_string());
+                    }
+                    name = Some(parsed_name.to_string());
+                }
+                Record::LowerBound(altitude) => {
+                    if lower_bound.is_some() {
+                        return Err("Could not set lower_bound (already defined)".to_string());
+                    }
+                    lower_bound = Some(altitude);
+                }
+                Record::UpperBound(altitude) => {
+                    if upper_bound.is_some() {
+                        return Err("Could not set upper_bound (already defined)".to_string());
+                    }
+                    upper_bound = Some(altitude);
+                }
+                Record::AirspaceType(parsed_type) => {
+                    if type_.is_some() {
+                        return Err("Could not set type (already defined)".to_string());
+                    }
+                    type_ = Some(parsed_type.to_string());
+                }
+                Record::Frequency(parsed_freq) => {
+                    if frequency.is_some() {
+                        return Err("Could not set frequency (already defined)".to_string());
+                    }
+                    frequency = Some(parsed_freq.to_string());
+                }
+                Record::CallSign(parsed_call_sign) => {
+                    if call_sign.is_some() {
+                        return Err("Could not set call_sign (already defined)".to_string());
+                    }
+                    call_sign = Some(parsed_call_sign.to_string());
+                }
+                Record::TransponderCode(code) => {
+                    if transponder_code.is_some() {
+                        return Err("Could not set transponder_code (already defined)".to_string());
+                    }
+                    transponder_code = Some(code);
+                }
+                Record::ActivationTimes(parsed_times) => {
+                    if activation_times.is_some() {
+                        return Err("Could not set activation_times (already defined)".to_string());
+                    }
+                    activation_times = Some(parsed_times);
+                }
+                Record::VarX(coord) => {
+                    var_x = Some(coord);
+                }
+                Record::VarD(direction) => {
+                    var_d = Some(direction);
+                }
+                Record::Point(coord) => {
+                    let segment = PolygonSegment::Point(coord);
+                    match &mut geom {
+                        None => {
+                            geom = Some(Geometry::Polygon {
+                                segments: vec![segment],
+                            });
+                        }
+                        Some(Geometry::Polygon { segments }) => {
+                            segments.push(segment);
+                        }
+                        Some(Geometry::Circle { .. }) => {
+                            return Err("Cannot add a point to a circle".to_string());
+                        }
+                    }
+                }
+                Record::CircleRadius(radius) => match (&geom, &var_x) {
+                    (None, Some(centerpoint)) => {
+                        geom = Some(Geometry::Circle {
+                            centerpoint: centerpoint.clone(),
+                            radius,
+                        });
+                    }
+                    (Some(_), _) => return Err("Geometry already set".to_string()),
+                    (_, None) => return Err("Centerpoint missing".to_string()),
+                },
+                Record::ArcSegmentData {
                     radius,
-                });
-                Ok(())
+                    angle_start,
+                    angle_end,
+                } => {
+                    let centerpoint = var_x.clone().ok_or("Centerpoint missing".to_string())?;
+                    let direction = var_d.unwrap_or_default();
+                    let arc_segment = ArcSegment {
+                        centerpoint,
+                        radius,
+                        angle_start,
+                        angle_end,
+                        direction,
+                    };
+                    let segment = PolygonSegment::ArcSegment(arc_segment);
+                    match &mut geom {
+                        None => {
+                            geom = Some(Geometry::Polygon {
+                                segments: vec![segment],
+                            });
+                        }
+                        Some(Geometry::Polygon { segments }) => {
+                            segments.push(segment);
+                        }
+                        Some(Geometry::Circle { .. }) => {
+                            return Err("Cannot add a point to a circle".to_string());
+                        }
+                    }
+                }
+                Record::ArcData { start, end } => {
+                    let centerpoint = var_x.clone().ok_or("Centerpoint missing".to_string())?;
+                    let direction = var_d.unwrap_or_default();
+                    let arc = Arc {
+                        centerpoint,
+                        start,
+                        end,
+                        direction,
+                    };
+                    let segment = PolygonSegment::Arc(arc);
+                    match &mut geom {
+                        None => {
+                            geom = Some(Geometry::Polygon {
+                                segments: vec![segment],
+                            });
+                        }
+                        Some(Geometry::Polygon { segments }) => {
+                            segments.push(segment);
+                        }
+                        Some(Geometry::Circle { .. }) => {
+                            return Err("Cannot add a point to a circle".to_string());
+                        }
+                    }
+                }
             }
-            (Some(_), _) => Err("Geometry already set".into()),
-            (_, None) => Err("Centerpoint missing".into()),
         }
-    }
-
-    fn finish(self) -> Result<Airspace, String> {
-        debug!("Finish {:?}", self.name);
-        let name = self.name.ok_or("Missing name")?;
-        let class = self
-            .class
-            .ok_or_else(|| format!("Missing class for '{name}'"))?;
-        let lower_bound = self
-            .lower_bound
-            .ok_or_else(|| format!("Missing lower bound for '{name}'"))?;
-        let upper_bound = self
-            .upper_bound
-            .ok_or_else(|| format!("Missing upper bound for '{name}'"))?;
-        let geom = self
-            .geom
-            .ok_or_else(|| format!("Missing geom for '{name}'"))?;
-        Ok(Airspace {
-            name,
-            class,
-            type_: self.type_,
-            lower_bound,
-            upper_bound,
-            geom,
-            frequency: self.frequency,
-            call_sign: self.call_sign,
-            transponder_code: self.transponder_code,
-            activation_times: self.activation_times,
-        })
     }
 }
 
-/// Return whether this line contains the start of a new airspace.
-#[inline]
-fn starts_airspace(line: &str) -> bool {
-    line.starts_with("AC ")
+impl<R: BufRead> Iterator for OpenAirIterator<R> {
+    type Item = Result<Airspace, String>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_airspace().transpose()
+    }
 }
 
-/// Process a line.
-fn process(builder: &mut AirspaceBuilder, line: &str) -> Result<(), String> {
-    if line.trim().is_empty() {
-        trace!("Empty line, ignoring");
-        return Ok(());
-    }
-
-    let mut chars = line.chars().filter(|c: &char| !c.is_ascii_whitespace());
-    let t1 = chars.next().ok_or_else(|| "Line too short".to_string())?;
-    let t2 = chars.next().unwrap_or(' ');
-    let data = line.split_once(' ').map(|x| x.1).unwrap_or("").trim();
-
-    trace!("Input: \"{:1}{:1}\"", t1, t2);
-    match (t1, t2) {
-        ('*', _) => trace!("-> Comment, ignore"),
-        ('A', 'C') => {
-            // Airspace class
-            let class = Class::parse(data)?;
-            trace!("-> Found class: {}", class);
-            builder.set_class(class)?;
-        }
-        ('A', 'N') => {
-            trace!("-> Found name: {}", data);
-            builder.set_name(data.to_string())?;
-        }
-        ('A', 'L') => {
-            let altitude = Altitude::parse(data)?;
-            trace!("-> Found lower bound: {}", altitude);
-            builder.set_lower_bound(altitude)?;
-        }
-        ('A', 'H') => {
-            let altitude = Altitude::parse(data)?;
-            trace!("-> Found upper bound: {}", altitude);
-            builder.set_upper_bound(altitude)?;
-        }
-        ('A', 'T') => {
-            trace!("-> Label placement hint, ignore");
-        }
-        ('A', 'Y') => {
-            trace!("-> Found type: {}", data);
-            builder.set_type(data.to_string())?;
-        }
-        ('A', 'F') => {
-            trace!("-> Found frequency: {}", data);
-            builder.set_frequency(data.to_string())?;
-        }
-        ('A', 'G') => {
-            trace!("-> Found call sign: {}", data);
-            builder.set_call_sign(data.to_string())?;
-        }
-        ('A', 'X') => {
-            let transponder_code = data
-                .parse()
-                .map_err(|_| format!("Invalid transponder code: {}", data))?;
-            trace!("-> Found transponder code: {}", transponder_code);
-            builder.set_transponder_code(transponder_code)?;
-        }
-        ('A', 'A') => {
-            let activation_times = data.parse()?;
-            trace!("-> Found activation times: {:?}", activation_times);
-            builder.set_activation_times(activation_times)?;
-        }
-        ('A', _) => trace!("-> Found unknown extension record: {}", line),
-        ('S', 'P') => trace!("-> Pen, ignore"),
-        ('S', 'B') => trace!("-> Brush, ignore"),
-        ('V', 'X') => {
-            trace!("-> Found X variable");
-            let coord = Coord::parse(data.get(2..).unwrap_or(""))?;
-            builder.set_var_x(coord);
-        }
-        ('V', 'D') => {
-            trace!("-> Found D variable");
-            let direction = Direction::parse(data.get(2..).unwrap_or(""))?;
-            builder.set_var_d(direction);
-        }
-        ('D', 'P') => {
-            trace!("-> Found point");
-            let coord = Coord::parse(data)?;
-            builder.add_segment(PolygonSegment::Point(coord))?;
-        }
-        ('D', 'C') => {
-            trace!("-> Found circle radius");
-            let radius = data
-                .parse::<f32>()
-                .map_err(|_| format!("Invalid radius: {data}"))?;
-            builder.set_circle_radius(radius)?;
-        }
-        ('D', 'A') => {
-            trace!("-> Found arc segment");
-            let centerpoint = builder.var_x.clone().ok_or("Centerpoint missing")?;
-            let direction = builder.var_d.unwrap_or_default();
-            let arc_segment = ArcSegment::parse(data, centerpoint, direction)?;
-            builder.add_segment(PolygonSegment::ArcSegment(arc_segment))?;
-        }
-        ('D', 'B') => {
-            trace!("-> Found arc");
-            let centerpoint = builder.var_x.clone().ok_or("Centerpoint missing")?;
-            let direction = builder.var_d.unwrap_or_default();
-            let arc = Arc::parse(data, centerpoint, direction)?;
-            builder.add_segment(PolygonSegment::Arc(arc))?;
-        }
-        (t1, t2) => return Err(format!("Parse error (unexpected \"{t1:1}{t2:1}\")")),
-    }
-    Ok(())
-}
-
-/// Process the reader until EOF, return a list of found airspaces.
-pub fn parse<R: BufRead>(reader: &mut R) -> Result<Vec<Airspace>, String> {
-    let mut airspaces = vec![];
-
-    let mut builder = AirspaceBuilder::new();
-    let mut buf: Vec<u8> = vec![];
-    loop {
-        // Read next line
-        buf.clear();
-        let bytes_read = reader
-            .read_until(0x0a /*\n*/, &mut buf)
-            .map_err(|e| format!("Could not read line: {e}"))?;
-        if bytes_read == 0 {
-            // EOF
-            trace!("Reached EOF");
-            airspaces.push(builder.finish()?);
-            return Ok(airspaces);
-        }
-        let line = String::from_utf8_lossy(&buf);
-
-        // Trim BOM and whitespace
-        let trimmed_line = line.trim_start_matches('\u{feff}').trim();
-
-        // Determine whether we reached the start of a new airspace
-        let start_of_airspace = starts_airspace(trimmed_line);
-
-        // A new airspace starts, collect the old one first
-        if start_of_airspace && !builder.new {
-            let old_builder = mem::replace(&mut builder, AirspaceBuilder::new());
-            airspaces.push(old_builder.finish()?);
-        }
-
-        // Process current line
-        process(&mut builder, trimmed_line)?;
-    }
+/// Process the reader until EOF, return an iterator over airspaces.
+pub fn parse<R: BufRead>(reader: R) -> impl Iterator<Item = Result<Airspace, String>> {
+    OpenAirIterator::new(reader)
 }
