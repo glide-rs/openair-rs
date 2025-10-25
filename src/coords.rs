@@ -1,3 +1,5 @@
+use std::io::Write;
+
 /// A coordinate pair (WGS84).
 #[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
@@ -30,6 +32,30 @@ impl Coord {
         }
 
         Ok(Self { lat, lng })
+    }
+
+    /// Writes coordinate in OpenAir DMS format.
+    ///
+    /// Format: `DD:MM:SS N/S DDD:MM:SS E/W`
+    pub fn write<W: Write>(&self, mut writer: W) -> std::io::Result<()> {
+        let total = (self.lat.abs() * 3600.0).round();
+        let lat_deg = (total / 3600.0).trunc() as u16;
+        let remaining = total - f64::from(lat_deg) * 3600.0;
+        let lat_min = (remaining / 60.0).trunc() as u16;
+        let lat_sec = (remaining - f64::from(lat_min) * 60.0) as u16;
+        let lat_dir = if self.lat >= 0.0 { 'N' } else { 'S' };
+
+        let total = (self.lng.abs() * 3600.0).round();
+        let lng_deg = (total / 3600.0).trunc() as u16;
+        let remaining = total - f64::from(lng_deg) * 3600.0;
+        let lng_min = (remaining / 60.0).trunc() as u16;
+        let lng_sec = (remaining - f64::from(lng_min) * 60.0) as u16;
+        let lng_dir = if self.lng >= 0.0 { 'E' } else { 'W' };
+
+        write!(
+            writer,
+            "{lat_deg:02}:{lat_min:02}:{lat_sec:02} {lat_dir} {lng_deg:03}:{lng_min:02}:{lng_sec:02} {lng_dir}",
+        )
     }
 }
 
@@ -203,5 +229,81 @@ mod tests {
     fn parse_invalid() {
         assert_compact_debug_snapshot!(Coord::parse("46:51:44 Q 009:19:42 R"), @r#"Err("Invalid coord: \"46:51:44 Q 009:19:42 R\"")"#);
         assert_compact_debug_snapshot!(Coord::parse("46x51x44 S 009x19x42 W"), @r#"Err("Invalid coord: \"46x51x44 S 009x19x42 W\"")"#);
+    }
+
+    fn lat_lng(lat: f64, lng: f64) -> Coord {
+        Coord { lat, lng }
+    }
+
+    fn write_coord(coord: &Coord) -> String {
+        let mut buf = Vec::new();
+        coord.write(&mut buf).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[test]
+    fn write_valid() {
+        // Zero
+        assert_compact_debug_snapshot!(write_coord(&lat_lng(0.0, 0.0)), @r#""00:00:00 N 000:00:00 E""#);
+
+        // All four quadrants
+        assert_compact_debug_snapshot!(
+            write_coord(&lat_lng(46.86222222222222, 9.328333333333333)),
+            @r#""46:51:44 N 009:19:42 E""#
+        );
+        assert_compact_debug_snapshot!(
+            write_coord(&lat_lng(-46.86222222222222, -9.328333333333333)),
+            @r#""46:51:44 S 009:19:42 W""#
+        );
+        assert_compact_debug_snapshot!(
+            write_coord(&lat_lng(45.70583333333334, -0.6447222222222222)),
+            @r#""45:42:21 N 000:38:41 W""#
+        );
+        assert_compact_debug_snapshot!(
+            write_coord(&lat_lng(-49.55222222222222, 5.793611111111111)),
+            @r#""49:33:08 S 005:47:37 E""#
+        );
+
+        // 3-digit longitude degrees
+        assert_compact_debug_snapshot!(
+            write_coord(&lat_lng(0.0, 123.456789)),
+            @r#""00:00:00 N 123:27:24 E""#
+        );
+
+        // Rounding down (< 0.5 seconds)
+        assert_compact_debug_snapshot!(
+            write_coord(&lat_lng(
+                1.0 + 0.0 / 60.0 + 0.4 / 3600.0,
+                2.0 + 0.0 / 60.0 + 0.4 / 3600.0,
+            )),
+            @r#""01:00:00 N 002:00:00 E""#
+        );
+
+        // Rounding up (≥ 0.5 seconds)
+        assert_compact_debug_snapshot!(
+            write_coord(&lat_lng(
+                1.0 + 0.0 / 60.0 + 0.5 / 3600.0,
+                2.0 + 0.0 / 60.0 + 0.5 / 3600.0,
+            )),
+            @r#""01:00:01 N 002:00:01 E""#
+        );
+
+        // Rounding causes seconds rollover to minutes
+        assert_compact_debug_snapshot!(
+            write_coord(&lat_lng(
+                1.0 + 30.0 / 60.0 + 59.5 / 3600.0,
+                2.0 + 45.0 / 60.0 + 59.5 / 3600.0,
+            )),
+            @r#""01:31:00 N 002:46:00 E""#
+        );
+
+        // Rounding causes minutes rollover to degrees
+        assert_compact_debug_snapshot!(
+            write_coord(&lat_lng(
+                1.0 + 59.0 / 60.0 + 59.5 / 3600.0,
+                2.0 + 59.0 / 60.0 + 59.5 / 3600.0,
+            )),
+            @r#""02:00:00 N 003:00:00 E""#
+        );
     }
 }
