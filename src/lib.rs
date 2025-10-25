@@ -441,6 +441,23 @@ pub fn parse<R: BufRead>(reader: &mut R) -> Result<Vec<Airspace>, String> {
     }
 }
 
+/// Writes multiple airspaces in OpenAir format.
+///
+/// Airspaces are separated by blank lines.
+pub fn write<'a, W: Write, I: IntoIterator<Item = &'a Airspace>>(
+    mut writer: W,
+    airspaces: I,
+) -> std::io::Result<()> {
+    for (i, airspace) in airspaces.into_iter().enumerate() {
+        if i != 0 {
+            // Write blank line between airspaces
+            write!(writer, "\r\n")?;
+        }
+        airspace.write(&mut writer)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
