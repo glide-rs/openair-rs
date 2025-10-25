@@ -1,13 +1,49 @@
-//! Simple line-based parser for airspace files in `OpenAir` format (used by
+//! Library for reading and writing airspace files in `OpenAir` format (used by
 //! flight instruments like Skytraxx and others).
 //!
 //! <http://www.winpilot.com/UsersGuide/UserAirspace.asp>
 //!
-//! If you want to use this library, you need the [`parse`](fn.parse.html)
-//! function as entry point.
+//! ## Reading
 //!
-//! For an example on how to use the parse function, see the examples in the
-//! source repository.
+//! Use the [`parse`] function to read airspace files:
+//!
+//! ```no_run
+//! # use std::fs::File;
+//! # use std::io::BufReader;
+//! let file = File::open("airspace.txt").unwrap();
+//! let mut reader = BufReader::new(file);
+//! let airspaces = openair::parse(&mut reader)
+//!     .collect::<Result<Vec<_>, _>>()
+//!     .unwrap();
+//! ```
+//!
+//! ## Writing
+//!
+//! Use the [`write`] function to write airspace files:
+//!
+//! ```no_run
+//! # use std::fs::File;
+//! use openair::{Airspace, Altitude, Class, Coord, Geometry};
+//!
+//! let airspace = Airspace {
+//!     name: "Example Zone".to_string(),
+//!     class: Class::D,
+//!     type_: None,
+//!     lower_bound: Altitude::Gnd,
+//!     upper_bound: Altitude::FlightLevel(100),
+//!     geom: Geometry::Circle {
+//!         centerpoint: Coord { lat: 47.0, lng: 8.0 },
+//!         radius: 5.0,
+//!     },
+//!     frequency: None,
+//!     call_sign: None,
+//!     transponder_code: None,
+//!     activation_times: None,
+//! };
+//!
+//! let file = File::create("output.txt").unwrap();
+//! openair::write(file, [&airspace]).unwrap();
+//! ```
 //!
 //! ## Implementation Notes
 //!
