@@ -1,6 +1,4 @@
-use std::{fmt, sync::LazyLock};
-
-use regex::Regex;
+use std::fmt;
 
 /// Altitude, either ground or a certain height AMSL in feet.
 #[derive(Debug, PartialEq, Eq)]
@@ -34,6 +32,27 @@ impl fmt::Display for Altitude {
     }
 }
 
+/// Strip a prefix from a string, case-insensitively
+fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    let prefix_len = prefix.len();
+    if s.is_char_boundary(prefix_len) && s[..prefix_len].eq_ignore_ascii_case(prefix) {
+        return Some(&s[prefix_len..]);
+    }
+
+    None
+}
+
+/// Check if a suffix indicates AMSL (above mean sea level)
+/// Empty string defaults to AMSL per README: "Altitude levels without a unit specifier will be treated as feet"
+fn is_amsl_suffix(s: &str) -> bool {
+    s.is_empty() || s.eq_ignore_ascii_case("amsl") || s.eq_ignore_ascii_case("msl")
+}
+
+/// Check if a suffix indicates AGL (above ground level)
+fn is_agl_suffix(s: &str) -> bool {
+    s.eq_ignore_ascii_case("agl") || s.eq_ignore_ascii_case("gnd") || s.eq_ignore_ascii_case("sfc")
+}
+
 impl Altitude {
     fn m2ft(val: i32) -> Result<i32, &'static str> {
         if val > 654_553_015 {
@@ -47,48 +66,74 @@ impl Altitude {
     }
 
     pub fn parse(data: &str) -> Result<Self, String> {
-        match data {
-            "gnd" | "Gnd" | "GND" | "sfc" | "Sfc" | "SFC" | "0" => {
-                // Note: SFC = Surface. Seems to be another abbreviation for GND.
-                Ok(Self::Gnd)
-            }
-            "unl" | "Unl" | "UNL" | "unlim" | "Unlim" | "UNLIM" | "unltd" | "Unltd" | "UNLTD"
-            | "unlimited" | "Unlimited" | "UNLIMITED" => Ok(Self::Unlimited),
-            fl if fl.starts_with("fl") || fl.starts_with("Fl") || fl.starts_with("FL") => {
-                match fl[2..].trim().parse::<u16>() {
-                    Ok(val) => Ok(Self::FlightLevel(val)),
-                    Err(_) => Err(format!("Invalid altitude: {}", fl)),
-                }
-            }
-            other => {
-                let is_digit = |c: &char| c.is_ascii_digit();
-                let number: String = other.chars().take_while(is_digit).collect();
-                let rest: String = other.chars().skip_while(is_digit).collect();
+        // Helper to check case-insensitive equality
+        let eq = |a: &str, b| a.eq_ignore_ascii_case(b);
 
-                static RE_FT_AMSL: LazyLock<Regex> =
-                    LazyLock::new(|| Regex::new(r"(?i)^ft(:? a?msl)?$").unwrap());
-                static RE_M_AMSL: LazyLock<Regex> =
-                    LazyLock::new(|| Regex::new(r"(?i)^m(:?sl)?$").unwrap());
-                static RE_FT_AGL: LazyLock<Regex> =
-                    LazyLock::new(|| Regex::new(r"(?i)^(:?ft )?(:?agl|gnd|sfc)$").unwrap());
-                static RE_M_AGL: LazyLock<Regex> =
-                    LazyLock::new(|| Regex::new(r"(?i)^(:?m )?(:?agl|gnd|sfc)$").unwrap());
-
-                if let Ok(val) = number.parse::<i32>() {
-                    let trimmed = rest.trim();
-                    if RE_FT_AMSL.is_match(trimmed) {
-                        return Ok(Self::FeetAmsl(val));
-                    } else if RE_FT_AGL.is_match(trimmed) {
-                        return Ok(Self::FeetAgl(val));
-                    } else if RE_M_AMSL.is_match(trimmed) {
-                        return Ok(Self::FeetAmsl(Self::m2ft(val)?));
-                    } else if RE_M_AGL.is_match(trimmed) {
-                        return Ok(Self::FeetAgl(Self::m2ft(val)?));
-                    }
-                }
-                Ok(Self::Other(other.to_string()))
-            }
+        // Check for ground level
+        // Note: SFC = Surface. Seems to be another abbreviation for GND.
+        if eq(data, "gnd") || eq(data, "sfc") || data == "0" {
+            return Ok(Self::Gnd);
         }
+
+        // Check for unlimited
+        if eq(data, "unl") || eq(data, "unlim") || eq(data, "unltd") || eq(data, "unlimited") {
+            return Ok(Self::Unlimited);
+        }
+
+        // Check for flight level
+        if let Some(after_fl) = strip_prefix_ci(data, "fl") {
+            return match after_fl.trim().parse::<u16>() {
+                Ok(val) => Ok(Self::FlightLevel(val)),
+                Err(_) => Ok(Self::Other(data.to_string())),
+            };
+        }
+
+        // Try to parse numeric altitude
+        // Find where digits end to split number from unit/reference suffix
+        let pos = data
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(data.len());
+
+        let (number, rest) = data.split_at(pos);
+
+        let Ok(mut val) = number.parse::<i32>() else {
+            return Ok(Self::Other(data.to_string()));
+        };
+
+        let rest = rest.trim();
+
+        // Check for simple single-word patterns first (e.g., "1000 MSL", "1000 AGL")
+        if is_amsl_suffix(rest) {
+            return Ok(Self::FeetAmsl(val));
+        }
+        if is_agl_suffix(rest) {
+            return Ok(Self::FeetAgl(val));
+        }
+
+        // Parse as a "unit [reference]" pattern (e.g., "ft AMSL", "m AGL", "ft", "m")
+        // Split on first whitespace to separate unit from optional reference level
+        let space_pos = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        let (unit, reference) = rest.split_at(space_pos);
+        let reference = reference.trim();
+
+        // Convert meters to feet or ensure the unit is "ft"
+        if eq(unit, "m") {
+            val = Self::m2ft(val)?;
+        } else if !eq(unit, "ft") {
+            // Unknown unit - can't parse
+            return Ok(Self::Other(data.to_string()));
+        }
+
+        // Now check the reference level (or empty for AMSL default)
+        if is_amsl_suffix(reference) {
+            return Ok(Self::FeetAmsl(val));
+        }
+        if is_agl_suffix(reference) {
+            return Ok(Self::FeetAgl(val));
+        }
+
+        // Unknown reference level
+        Ok(Self::Other(data.to_string()))
     }
 }
 
@@ -149,6 +194,125 @@ mod tests {
         assert_eq!(
             Altitude::parse("FL130").unwrap(),
             Altitude::FlightLevel(130)
+        );
+    }
+
+    #[test]
+    fn parse_msl_amsl_equivalence() {
+        // MSL and AMSL should be treated identically
+        assert_eq!(
+            Altitude::parse("1000 MSL").unwrap(),
+            Altitude::FeetAmsl(1000)
+        );
+        assert_eq!(
+            Altitude::parse("1000 AMSL").unwrap(),
+            Altitude::FeetAmsl(1000)
+        );
+        assert_eq!(
+            Altitude::parse("1000msl").unwrap(),
+            Altitude::FeetAmsl(1000)
+        );
+        assert_eq!(
+            Altitude::parse("1000ft MSL").unwrap(),
+            Altitude::FeetAmsl(1000)
+        );
+        assert_eq!(
+            Altitude::parse("1000 ft AMSL").unwrap(),
+            Altitude::FeetAmsl(1000)
+        );
+    }
+
+    #[test]
+    fn parse_meters_amsl() {
+        // Meters should be converted to feet
+        assert_eq!(Altitude::parse("100m").unwrap(), Altitude::FeetAmsl(328));
+        assert_eq!(Altitude::parse("100 m").unwrap(), Altitude::FeetAmsl(328));
+        assert_eq!(
+            Altitude::parse("100m MSL").unwrap(),
+            Altitude::FeetAmsl(328)
+        );
+        assert_eq!(
+            Altitude::parse("100 m AMSL").unwrap(),
+            Altitude::FeetAmsl(328)
+        );
+    }
+
+    #[test]
+    fn parse_meters_agl() {
+        // Meters AGL should be converted to feet
+        assert_eq!(Altitude::parse("100m agl").unwrap(), Altitude::FeetAgl(328));
+        assert_eq!(
+            Altitude::parse("100 m AGL").unwrap(),
+            Altitude::FeetAgl(328)
+        );
+        assert_eq!(Altitude::parse("100m gnd").unwrap(), Altitude::FeetAgl(328));
+        assert_eq!(
+            Altitude::parse("100 m SFC").unwrap(),
+            Altitude::FeetAgl(328)
+        );
+    }
+
+    #[test]
+    fn parse_whitespace_variations() {
+        // No space
+        assert_eq!(Altitude::parse("1000ft").unwrap(), Altitude::FeetAmsl(1000));
+        assert_eq!(Altitude::parse("100m").unwrap(), Altitude::FeetAmsl(328));
+
+        // Single space
+        assert_eq!(
+            Altitude::parse("1000 ft").unwrap(),
+            Altitude::FeetAmsl(1000)
+        );
+        assert_eq!(Altitude::parse("100 m").unwrap(), Altitude::FeetAmsl(328));
+
+        // Multiple spaces
+        assert_eq!(
+            Altitude::parse("1000  ft").unwrap(),
+            Altitude::FeetAmsl(1000)
+        );
+        assert_eq!(
+            Altitude::parse("1000   ft   AMSL").unwrap(),
+            Altitude::FeetAmsl(1000)
+        );
+
+        // Trailing spaces (from German data)
+        assert_eq!(
+            Altitude::parse("1000ft MSL ").unwrap(),
+            Altitude::FeetAmsl(1000)
+        );
+    }
+
+    #[test]
+    fn parse_case_variations() {
+        // Mixed case for all keywords
+        assert_eq!(Altitude::parse("1000FT").unwrap(), Altitude::FeetAmsl(1000));
+        assert_eq!(Altitude::parse("1000Ft").unwrap(), Altitude::FeetAmsl(1000));
+        assert_eq!(Altitude::parse("1000fT").unwrap(), Altitude::FeetAmsl(1000));
+        assert_eq!(Altitude::parse("100M").unwrap(), Altitude::FeetAmsl(328));
+        assert_eq!(
+            Altitude::parse("1000 Msl").unwrap(),
+            Altitude::FeetAmsl(1000)
+        );
+        assert_eq!(
+            Altitude::parse("1000 aMsL").unwrap(),
+            Altitude::FeetAmsl(1000)
+        );
+        assert_eq!(
+            Altitude::parse("1000 AgL").unwrap(),
+            Altitude::FeetAgl(1000)
+        );
+    }
+
+    #[test]
+    fn parse_unparseable() {
+        // Truly unparseable inputs should become Other
+        assert_eq!(
+            Altitude::parse("something random").unwrap(),
+            Altitude::Other("something random".to_string())
+        );
+        assert_eq!(
+            Altitude::parse("1000xyz").unwrap(),
+            Altitude::Other("1000xyz".to_string())
         );
     }
 }
