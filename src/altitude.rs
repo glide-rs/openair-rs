@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, io::Write};
 
 /// Altitude, either ground or a certain height AMSL in feet.
 #[derive(Debug, PartialEq, Eq)]
@@ -54,6 +54,18 @@ fn is_agl_suffix(s: &str) -> bool {
 }
 
 impl Altitude {
+    /// Writes the altitude in OpenAir format.
+    pub fn write<W: Write>(&self, mut writer: W) -> std::io::Result<()> {
+        match self {
+            Self::Gnd => write!(writer, "GND"),
+            Self::FeetAmsl(n) => write!(writer, "{n}ft AMSL"),
+            Self::FeetAgl(n) => write!(writer, "{n}ft AGL"),
+            Self::FlightLevel(n) => write!(writer, "FL{n}"),
+            Self::Unlimited => write!(writer, "UNLIM"),
+            Self::Other(s) => write!(writer, "{s}"),
+        }
+    }
+
     fn m2ft(val: i32) -> Result<i32, &'static str> {
         if val > 654_553_015 {
             return Err("m2ft out of bounds (too large)");
@@ -313,6 +325,26 @@ mod tests {
         assert_eq!(
             Altitude::parse("1000xyz").unwrap(),
             Altitude::Other("1000xyz".to_string())
+        );
+    }
+
+    fn write_altitude(altitude: &Altitude) -> String {
+        let mut buf = Vec::new();
+        altitude.write(&mut buf).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[test]
+    fn write() {
+        assert_eq!(write_altitude(&Altitude::Gnd), "GND");
+        assert_eq!(write_altitude(&Altitude::FeetAmsl(5000)), "5000ft AMSL");
+        assert_eq!(write_altitude(&Altitude::FeetAmsl(-200)), "-200ft AMSL");
+        assert_eq!(write_altitude(&Altitude::FeetAgl(1500)), "1500ft AGL");
+        assert_eq!(write_altitude(&Altitude::FlightLevel(195)), "FL195");
+        assert_eq!(write_altitude(&Altitude::Unlimited), "UNLIM");
+        assert_eq!(
+            write_altitude(&Altitude::Other("custom".to_string())),
+            "custom"
         );
     }
 }
