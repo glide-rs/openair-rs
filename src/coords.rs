@@ -1,7 +1,3 @@
-use std::sync::LazyLock;
-
-use regex::Regex;
-
 /// A coordinate pair (WGS84).
 #[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
@@ -11,87 +7,131 @@ pub struct Coord {
 }
 
 impl Coord {
-    fn parse_number_opt(val: Option<&str>) -> Result<u16, ()> {
-        val.and_then(|v| v.parse::<u16>().ok()).ok_or(())
-    }
-
-    fn parse_component(val: &str) -> Result<f64, ()> {
-        // Split by colon to separate degrees, minutes, and seconds
-        let mut colon_parts = val.split(':');
-        let deg = Self::parse_number_opt(colon_parts.next())?;
-
-        // Get the minutes (decimal in DDM format or integer in DMS format)
-        let raw_minutes = colon_parts.next().ok_or(())?;
-
-        // Check if there's a third part (seconds in DMS format)
-        //
-        // See <https://github.com/naviter/seeyou_file_formats/blob/v2.1.2/OpenAir_File_Format_Support.md#geographic-position>
-        if let Some(sec_part) = colon_parts.next() {
-            // DMS format: DD:MM:SS or DD:MM:SS.fff
-            let min = Self::parse_number_opt(Some(raw_minutes))?;
-            let mut dot_parts = sec_part.split('.');
-            let sec = Self::parse_number_opt(dot_parts.next())?;
-            let mut total = f64::from(deg) + f64::from(min) / 60.0 + f64::from(sec) / 3600.0;
-
-            // Handle fractional seconds if present
-            if let Some(fractional) = dot_parts.next() {
-                let frac = fractional.parse::<u16>().map_err(|_| ())?;
-                total += f64::from(frac) / 10_f64.powi(fractional.len() as i32) / 3600.0;
-            }
-            Ok(total)
-        } else if raw_minutes.contains('.') {
-            // DDM format: DD:MM.mmm
-            let decimal_minutes = raw_minutes.parse::<f64>().map_err(|_| ())?;
-            let total = f64::from(deg) + decimal_minutes / 60.0;
-            Ok(total)
-        } else {
-            // Invalid format
-            Err(())
-        }
-    }
-
-    fn multiplier_lat(val: &str) -> Result<f64, ()> {
-        match val {
-            "N" | "n" => Ok(1.0),
-            "S" | "s" => Ok(-1.0),
-            _ => Err(()),
-        }
-    }
-
-    fn multiplier_lng(val: &str) -> Result<f64, ()> {
-        match val {
-            "E" | "e" => Ok(1.0),
-            "W" | "w" => Ok(-1.0),
-            _ => Err(()),
-        }
-    }
-
     pub fn parse(data: &str) -> Result<Self, String> {
-        static RE: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(
-                r"(?xi)
-                ([0-9]{1,3}[\.:][0-9]{1,3}[\.:][0-9]{1,3}(:?\.?[0-9]{1,3})?)  # Lat
-                \s*
-                ([NS])                                    # North / South
-                \s*,?\s*
-                ([0-9]{1,3}[\.:][0-9]{1,3}[\.:][0-9]{1,3}(:?\.?[0-9]{1,3})?)  # Lon
-                \s*
-                ([EW])                                    # East / West
-            ",
-            )
-            .unwrap()
-        });
+        let input = data.trim();
+        let err = || format!("Invalid coord: \"{data}\"");
 
-        let invalid = |_| format!("Invalid coord: \"{data}\"");
-        let cap = RE
-            .captures(data)
-            .ok_or_else(|| format!("Invalid coord: \"{data}\""))?;
-        let lat = Self::multiplier_lat(&cap[3]).map_err(invalid)?
-            * Self::parse_component(&cap[1]).map_err(invalid)?;
-        let lng = Self::multiplier_lng(&cap[6]).map_err(invalid)?
-            * Self::parse_component(&cap[4]).map_err(invalid)?;
+        // Parse latitude coordinate and direction
+        let (mut lat, rest) = parse_coord_component(input, true).map_err(|_| err())?;
+        let (lat_is_negative, rest) = parse_direction(rest, true).map_err(|_| err())?;
+        if lat_is_negative {
+            lat = -lat;
+        }
+
+        // Skip whitespace and optional comma
+        let rest = rest.trim_start();
+        let rest = rest.strip_prefix(',').unwrap_or(rest).trim_start();
+
+        // Parse longitude coordinate and direction
+        let (mut lng, rest) = parse_coord_component(rest, false).map_err(|_| err())?;
+        let (lng_is_negative, _rest) = parse_direction(rest, false).map_err(|_| err())?;
+        if lng_is_negative {
+            lng = -lng;
+        }
+
         Ok(Self { lat, lng })
     }
+}
+
+fn parse_coord_component(input: &str, is_lat: bool) -> Result<(f64, &str), ()> {
+    // Parse degrees
+    let pos = input.find(|c: char| !c.is_ascii_digit()).ok_or(())?;
+
+    let max_digits = if is_lat { 2 } else { 3 };
+    if pos > max_digits {
+        return Err(());
+    }
+
+    let (deg_str, rest) = input.split_at(pos);
+    let degrees = f64::from(deg_str.parse::<u8>().map_err(|_| ())?);
+
+    // Validate degree ranges
+    if (is_lat && degrees > 90.) || (!is_lat && degrees > 180.) {
+        return Err(());
+    }
+
+    // Expect colon
+    let rest = rest.strip_prefix(':').ok_or(())?;
+
+    // Parse minutes
+    let pos = rest.find(|c: char| !c.is_ascii_digit()).ok_or(())?;
+    if pos > 2 {
+        return Err(());
+    }
+    let (min_str, rest) = rest.split_at(pos);
+    let minutes = f64::from(min_str.parse::<u8>().map_err(|_| ())?);
+
+    // Log warning for invalid minutes
+    if minutes >= 60. {
+        log::debug!("Minutes >= 60 in coordinate: {}", input);
+    }
+
+    // Check if this is DDM format (decimal minutes)
+    if rest.starts_with('.') {
+        // DDM format: parse fractional minutes (e.g., ".44" -> 0.44)
+        let pos = rest
+            .find(|c: char| !c.is_ascii_digit() && c != '.')
+            .unwrap_or(rest.len());
+        let (frac_str, rest) = rest.split_at(pos);
+        let frac_minutes = frac_str.parse::<f64>().map_err(|_| ())?;
+
+        // Calculate decimal degrees for DDM format
+        let total = degrees + (minutes + frac_minutes) / 60.0;
+
+        return Ok((total, rest));
+    }
+
+    // DMS format: expect colon then parse seconds (with optional fractional part)
+    let rest = rest.strip_prefix(':').ok_or(())?;
+
+    // Find end of integer part of seconds
+    let int_pos = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+
+    // Check that integer part has at most 2 digits
+    if int_pos > 2 {
+        return Err(());
+    }
+
+    // Find end of seconds (including fractional part)
+    let pos = rest
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .unwrap_or(rest.len());
+
+    let (sec_str, rest) = rest.split_at(pos);
+    let seconds = sec_str.parse::<f64>().map_err(|_| ())?;
+
+    // Log warning for invalid seconds (check integer part)
+    if seconds >= 60. {
+        log::debug!("Seconds >= 60 in coordinate: {}", input);
+    }
+
+    // Calculate decimal degrees for DMS format
+    let total = degrees + minutes / 60.0 + seconds / 3600.0;
+
+    Ok((total, rest))
+}
+
+fn parse_direction(input: &str, is_lat: bool) -> Result<(bool, &str), ()> {
+    let input = input.trim_start();
+    let ch = input.chars().next().ok_or(())?;
+
+    let is_negative = if is_lat {
+        match ch {
+            'N' | 'n' => false,
+            'S' | 's' => true,
+            _ => return Err(()),
+        }
+    } else {
+        match ch {
+            'E' | 'e' => false,
+            'W' | 'w' => true,
+            _ => return Err(()),
+        }
+    };
+
+    Ok((is_negative, &input[ch.len_utf8()..]))
 }
 
 #[cfg(test)]
@@ -122,6 +162,41 @@ mod tests {
 
         // Lowercase letters
         assert_compact_debug_snapshot!(Coord::parse("49:33:8 n 5:47:37 e"), @"Ok(Coord { lat: 49.55222222222222, lng: 5.793611111111111 })");
+    }
+
+    #[test]
+    fn parse_boundary_validation() {
+        // Latitude degree boundaries
+        assert_compact_debug_snapshot!(Coord::parse("90:00:00 N 000:00:00 E"), @"Ok(Coord { lat: 90.0, lng: 0.0 })");
+        assert_compact_debug_snapshot!(Coord::parse("91:00:00 N 000:00:00 E"), @r#"Err("Invalid coord: \"91:00:00 N 000:00:00 E\"")"#);
+
+        // Longitude degree boundaries
+        assert_compact_debug_snapshot!(Coord::parse("00:00:00 N 180:00:00 E"), @"Ok(Coord { lat: 0.0, lng: 180.0 })");
+        assert_compact_debug_snapshot!(Coord::parse("00:00:00 N 181:00:00 E"), @r#"Err("Invalid coord: \"00:00:00 N 181:00:00 E\"")"#);
+
+        // Single-digit latitude degrees
+        assert_compact_debug_snapshot!(Coord::parse("5:00:00 N 000:00:00 E"), @"Ok(Coord { lat: 5.0, lng: 0.0 })");
+    }
+
+    #[test]
+    fn parse_invalid_minutes_seconds() {
+        // Minutes >= 60 should parse but log warning
+        assert_compact_debug_snapshot!(Coord::parse("42:60:00 N 001:00:00 E"), @"Ok(Coord { lat: 43.0, lng: 1.0 })");
+
+        // Seconds >= 60 should parse but log warning
+        assert_compact_debug_snapshot!(Coord::parse("42:00:60 N 001:00:00 E"), @"Ok(Coord { lat: 42.016666666666666, lng: 1.0 })");
+    }
+
+    #[test]
+    fn parse_digit_count_limits() {
+        // 3-digit latitude degrees should fail
+        assert_compact_debug_snapshot!(Coord::parse("123:00:00 N 000:00:00 E"), @r#"Err("Invalid coord: \"123:00:00 N 000:00:00 E\"")"#);
+
+        // 3-digit minutes should fail
+        assert_compact_debug_snapshot!(Coord::parse("45:123:00 N 000:00:00 E"), @r#"Err("Invalid coord: \"45:123:00 N 000:00:00 E\"")"#);
+
+        // 3-digit seconds should fail
+        assert_compact_debug_snapshot!(Coord::parse("45:00:123 N 000:00:00 E"), @r#"Err("Invalid coord: \"45:00:123 N 000:00:00 E\"")"#);
     }
 
     #[test]
