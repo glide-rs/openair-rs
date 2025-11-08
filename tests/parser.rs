@@ -9,7 +9,7 @@ fn test_switzerland_fixture() {
     let airspace = include_bytes!("../example_data/Switzerland.txt");
     let mut cursor = Cursor::new(airspace);
 
-    let spaces = parse(&mut cursor).unwrap();
+    let spaces = parse(&mut cursor).collect::<Result<Vec<_>, _>>().unwrap();
     assert_debug_snapshot!(spaces.first().unwrap());
 
     let names = spaces.iter().map(|a| a.to_string()).collect::<Vec<_>>();
@@ -21,7 +21,7 @@ fn test_germany_fixture() {
     let airspace = include_bytes!("../example_data/Germany.txt");
     let mut cursor = Cursor::new(airspace);
 
-    let spaces = parse(&mut cursor).unwrap();
+    let spaces = parse(&mut cursor).collect::<Result<Vec<_>, _>>().unwrap();
     assert_debug_snapshot!(spaces.first().unwrap());
 
     let names = spaces.iter().map(|a| a.to_string()).collect::<Vec<_>>();
@@ -33,7 +33,7 @@ fn test_germany_border_fixture() {
     let airspace = include_bytes!("../example_data/Germany_Border.txt");
     let mut cursor = Cursor::new(airspace);
 
-    let spaces = parse(&mut cursor).unwrap();
+    let spaces = parse(&mut cursor).collect::<Result<Vec<_>, _>>().unwrap();
     assert_debug_snapshot!(spaces.first().unwrap());
 
     let names = spaces.iter().map(|a| a.to_string()).collect::<Vec<_>>();
@@ -45,7 +45,7 @@ fn test_france_fixture() {
     let airspace = include_bytes!("../example_data/France.txt");
     let mut cursor = Cursor::new(airspace);
 
-    let spaces = parse(&mut cursor).unwrap();
+    let spaces = parse(&mut cursor).collect::<Result<Vec<_>, _>>().unwrap();
     assert_debug_snapshot!(spaces.first().unwrap());
     assert_debug_snapshot!(spaces.last().unwrap());
 
@@ -69,7 +69,7 @@ fn flyland_buochs() {
         * n-Points: 5
     "}
     .as_bytes();
-    let mut spaces = parse(&mut airspace).unwrap();
+    let mut spaces = parse(&mut airspace).collect::<Result<Vec<_>, _>>().unwrap();
     assert_eq!(spaces.len(), 1);
     let space: Airspace = spaces.pop().unwrap();
     assert_eq!(space.name, "BUOCHS Be CTR 119.625");
@@ -105,8 +105,10 @@ fn inverted_bounds() {
         *
     "}
     .as_bytes();
-    let space1 = parse(&mut a1).unwrap().pop().unwrap();
-    let space2 = parse(&mut a2).unwrap().pop().unwrap();
+    let spaces1 = parse(&mut a1).collect::<Result<Vec<_>, _>>().unwrap();
+    let spaces2 = parse(&mut a2).collect::<Result<Vec<_>, _>>().unwrap();
+    let space1 = spaces1.last().unwrap();
+    let space2 = spaces2.last().unwrap();
     assert_eq!(space1, space2);
 }
 
@@ -127,7 +129,8 @@ fn multi_variable() {
         *
     "}
     .as_bytes();
-    let airspace = parse(&mut a).unwrap().pop().unwrap();
+    let spaces = parse(&mut a).collect::<Result<Vec<_>, _>>().unwrap();
+    let airspace = spaces.last().unwrap();
     assert_eq!(
         airspace.geom,
         Geometry::Polygon {
@@ -174,7 +177,8 @@ fn extension_records() {
         DC 5
     "}
     .as_bytes();
-    let airspace = parse(&mut a).unwrap().pop().unwrap();
+    let spaces = parse(&mut a).collect::<Result<Vec<_>, _>>().unwrap();
+    let airspace = spaces.last().unwrap();
     assert_eq!(airspace.type_, Some("AWY".to_string()));
     assert_eq!(airspace.frequency, Some("132.350".to_string()));
     assert_eq!(airspace.call_sign, Some("Dutch Mil".to_string()));

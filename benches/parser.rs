@@ -20,7 +20,9 @@ fn parser_benchmark(c: &mut Criterion) {
         c.bench_function(id, |b| {
             b.iter(|| {
                 let mut cursor = Cursor::new(bytes);
-                openair::parse(&mut cursor).unwrap()
+                openair::parse(&mut cursor)
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap()
             });
         });
     }
