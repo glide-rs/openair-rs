@@ -1,7 +1,7 @@
 use std::fmt;
 
 /// Airspace class.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum Class {
     /// Airspace A
@@ -66,5 +66,52 @@ impl Class {
             "UNC" => Ok(Self::Unclassified),
             other => Err(format!("Invalid class: {other}")),
         }
+    }
+
+    /// Returns the OpenAir string representation for this class.
+    pub fn to_str(&self) -> &str {
+        match self {
+            Self::A => "A",
+            Self::B => "B",
+            Self::C => "C",
+            Self::D => "D",
+            Self::E => "E",
+            Self::F => "F",
+            Self::G => "G",
+            Self::Ctr => "CTR",
+            Self::Restricted => "R",
+            Self::Danger => "Q",
+            Self::Prohibited => "P",
+            Self::GliderProhibited => "GP",
+            Self::WaveWindow => "W",
+            Self::RadioMandatoryZone => "RMZ",
+            Self::TransponderMandatoryZone => "TMZ",
+            Self::Unclassified => "UNC",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_str() {
+        assert_eq!(Class::A.to_str(), "A");
+        assert_eq!(Class::B.to_str(), "B");
+        assert_eq!(Class::C.to_str(), "C");
+        assert_eq!(Class::D.to_str(), "D");
+        assert_eq!(Class::E.to_str(), "E");
+        assert_eq!(Class::F.to_str(), "F");
+        assert_eq!(Class::G.to_str(), "G");
+        assert_eq!(Class::Ctr.to_str(), "CTR");
+        assert_eq!(Class::Restricted.to_str(), "R");
+        assert_eq!(Class::Danger.to_str(), "Q");
+        assert_eq!(Class::Prohibited.to_str(), "P");
+        assert_eq!(Class::GliderProhibited.to_str(), "GP");
+        assert_eq!(Class::WaveWindow.to_str(), "W");
+        assert_eq!(Class::RadioMandatoryZone.to_str(), "RMZ");
+        assert_eq!(Class::TransponderMandatoryZone.to_str(), "TMZ");
+        assert_eq!(Class::Unclassified.to_str(), "UNC");
     }
 }

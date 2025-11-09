@@ -3,7 +3,7 @@
 [![CI](https://github.com/glide-rs/openair-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/glide-rs/openair-rs/actions/workflows/ci.yml)
 [![Docs][docs-badge]][docs]
 
-A Rust parser for airspace files in OpenAir format (used by flight instruments
+A Rust library for reading and writing airspace files in OpenAir format (used by flight instruments
 like Skytraxx and others).
 
 http://www.winpilot.com/UsersGuide/UserAirspace.asp (see also `FORMAT.txt`)
@@ -16,6 +16,7 @@ Docs: https://docs.rs/openair/
 Supported file format features:
 
 - [x] Parse airspace metadata
+- [x] Write airspace metadata
 - [ ] Parse terrain metadata
 - [x] Support polygon points
 - [x] Support circles
@@ -41,11 +42,39 @@ record) or when the file ends.
 treated as feet!)**
 
 
-## Example
+## Examples
+
+### Parsing
 
 You can try the parser using the example program:
 
     $ cargo run --example parse_file example_data/Switzerland.txt
+
+### Writing
+
+```rust,no_run
+use std::fs::File;
+use openair::{Airspace, Altitude, Class, Coord, Geometry};
+
+let airspace = Airspace {
+    name: "Example Zone".to_string(),
+    class: Class::D,
+    type_: None,
+    lower_bound: Altitude::Gnd,
+    upper_bound: Altitude::FlightLevel(100),
+    geom: Geometry::Circle {
+        centerpoint: Coord { lat: 47.0, lng: 8.0 },
+        radius: 5.0,
+    },
+    frequency: None,
+    call_sign: None,
+    transponder_code: None,
+    activation_times: None,
+};
+
+let file = File::create("output.txt").unwrap();
+openair::write(file, [&airspace]).unwrap();
+```
 
 
 ## Serde Serialization
