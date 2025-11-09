@@ -216,6 +216,9 @@ struct OpenAirIterator<R: BufRead> {
     reader: R,
     line: Vec<u8>,
     use_buffered_line: bool,
+    /// Tracks whether the last non-ignored record was a header record.
+    /// Used to detect transitions from non-header to header, which indicate a new airspace.
+    last_was_header: bool,
 }
 
 impl<R: BufRead> OpenAirIterator<R> {
@@ -233,6 +236,7 @@ impl<R: BufRead> OpenAirIterator<R> {
             reader,
             line,
             use_buffered_line,
+            last_was_header: true,
         }
     }
 
@@ -302,11 +306,11 @@ impl<R: BufRead> OpenAirIterator<R> {
             let trimmed = line_str.trim_start_matches('\u{feff}');
             let record = Record::parse(trimmed)?;
 
-            // If we see a new AirspaceClass record and we already have accumulated
-            // an airspace, we should return the current airspace first.
-            if matches!(record, Record::AirspaceClass(_))
-                && let Some(class) = class
-            {
+            // Check if we're transitioning from non-header to header records.
+            // This indicates the start of a new airspace, so we should yield the current one.
+            let is_header = record.is_header();
+            let should_yield = is_header && !self.last_was_header && class.is_some();
+            if should_yield {
                 // Mark the current line as not consumed yet so that we can
                 // reuse it in the `next()` iteration.
                 self.use_buffered_line = true;
@@ -319,6 +323,8 @@ impl<R: BufRead> OpenAirIterator<R> {
                 let upper_bound =
                     upper_bound.ok_or_else(|| format!("Missing upper bound for '{name}'"))?;
                 let geom = geom.ok_or_else(|| format!("Missing geom for '{name}'"))?;
+                // We already checked that class.is_some() in should_yield condition
+                let class = class.unwrap();
                 return Ok(Some(Airspace {
                     name,
                     class,
@@ -331,6 +337,12 @@ impl<R: BufRead> OpenAirIterator<R> {
                     transponder_code,
                     activation_times,
                 }));
+            }
+
+            // Update state tracking for header/non-header transitions.
+            let is_ignored = matches!(record, Record::Empty | Record::Comment);
+            if !is_ignored {
+                self.last_was_header = is_header;
             }
 
             // Process the record

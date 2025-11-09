@@ -61,6 +61,24 @@ pub enum Record<'a> {
 }
 
 impl<'a> Record<'a> {
+    /// Returns true if this record is a header record (A* records that define airspace properties).
+    /// Header records include AC, AN, AL, AH, AY, AF, AG, AX, AA, and unknown A* extensions.
+    pub fn is_header(&self) -> bool {
+        matches!(
+            self,
+            Record::AirspaceClass(_)
+                | Record::AirspaceName(_)
+                | Record::LowerBound(_)
+                | Record::UpperBound(_)
+                | Record::AirspaceType(_)
+                | Record::Frequency(_)
+                | Record::CallSign(_)
+                | Record::TransponderCode(_)
+                | Record::ActivationTimes(_)
+                | Record::UnknownExtension(_)
+        )
+    }
+
     /// Writes the record in OpenAir format with CRLF line ending.
     pub fn write<W: Write>(self, mut writer: W) -> std::io::Result<()> {
         match self {
