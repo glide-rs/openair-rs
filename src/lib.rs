@@ -352,7 +352,16 @@ impl<R: BufRead> OpenAirIterator<R> {
             }
 
             // Update state tracking for header/non-header transitions.
-            let is_ignored = matches!(record, Record::Empty | Record::Comment);
+            // Display hints (AT, SP, SB) may sit between header records, so
+            // they must not count as the end of the header block.
+            let is_ignored = matches!(
+                record,
+                Record::Empty
+                    | Record::Comment
+                    | Record::LabelPlacement
+                    | Record::Pen
+                    | Record::Brush
+            );
             if !is_ignored {
                 self.last_was_header = is_header;
             }

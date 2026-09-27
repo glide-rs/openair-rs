@@ -281,3 +281,45 @@ fn an_record_as_separator() {
     assert_eq!(second.lower_bound, Altitude::FeetAmsl(1000));
     assert_eq!(second.upper_bound, Altitude::FlightLevel(100));
 }
+
+/// Display hints (SP pen, SB brush, AT label) between header records must not
+/// be mistaken for the end of the header block, which would split one airspace
+/// in two.
+#[test]
+fn display_hints_between_header_records() {
+    let mut airspace_data = indoc! {"
+        AC R
+        AN FIRST AIRSPACE
+        SP 0,2,156,94,8
+        SB 240,180,80
+        AT 50:00:30 N 010:00:30 E
+        AH 4430ft AMSL
+        AL GND
+        DP 50:00:00 N 010:00:00 E
+        DP 50:00:00 N 010:01:00 E
+        DP 50:01:00 N 010:01:00 E
+        SP 0,1,0,0,255
+        SB -1,-1,-1
+        AC D
+        AN SECOND AIRSPACE
+        AL GND
+        AH FL100
+        DP 51:00:00 N 011:00:00 E
+        DP 51:00:00 N 011:01:00 E
+        DP 51:01:00 N 011:01:00 E
+    "}
+    .as_bytes();
+
+    let spaces = parse(&mut airspace_data)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    assert_eq!(spaces.len(), 2);
+    let first = &spaces[0];
+    assert_eq!(first.name.as_deref(), Some("FIRST AIRSPACE"));
+    assert_eq!(first.lower_bound, Altitude::Gnd);
+    assert_eq!(first.upper_bound, Altitude::FeetAmsl(4430));
+    let second = &spaces[1];
+    assert_eq!(second.name.as_deref(), Some("SECOND AIRSPACE"));
+    assert_eq!(second.class, Class::D);
+}
