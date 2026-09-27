@@ -16,6 +16,10 @@ Possible log types:
 
 - ...
 
+### v0.6.1 (2026-09-27)
+
+- [fixed] Ignore display records in header-based airspace separation (#55)
+
 ### v0.6.0 (2026-08-22)
 
 - [added] Add support for OpenAir v2 `AY` airspace types (#52)

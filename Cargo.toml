@@ -1,6 +1,6 @@
 [package]
 name = "openair"
-version = "0.6.0"
+version = "0.6.1"
 description = "Library for reading and writing airspace files in OpenAir format."
 keywords = ["airspace", "skytraxx", "variometer", "openair", "parser"]
 categories = ["parser-implementations"]
