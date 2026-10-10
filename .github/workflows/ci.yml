@@ -32,10 +32,13 @@ jobs:
   rustfmt:
     name: Check code formatting
     runs-on: ubuntu-latest
+    env:
+      # renovate: datasource=rust-version depName=rust
+      RUST_NIGHTLY_VERSION: nightly-2025-10-18
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2025-10-18
+          toolchain: ${{ env.RUST_NIGHTLY_VERSION }}
           components: rustfmt
-      - run: cargo +nightly-2025-10-18 fmt -- --check
+      - run: cargo +${{ env.RUST_NIGHTLY_VERSION }} fmt -- --check

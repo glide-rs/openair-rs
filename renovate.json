@@ -1,0 +1,16 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices",
+    "schedule:monthly",
+    ":maintainLockFilesMonthly",
+    ":prHourlyLimitNone",
+    "customManagers:githubActionsVersions"
+  ],
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "non-major dependencies"
+    }
+  ]
+}
