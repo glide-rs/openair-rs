@@ -11,7 +11,7 @@ jobs:
     name: Build and test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Run check
         run: cargo check --all-features
       - name: Run tests (default features)
@@ -25,7 +25,7 @@ jobs:
     name: Run clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: rustup component add clippy
       - run: cargo clippy --all-targets --all-features -- -D warnings
 
@@ -36,8 +36,8 @@ jobs:
       # renovate: datasource=rust-version depName=rust
       RUST_NIGHTLY_VERSION: nightly-2025-10-18
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: ${{ env.RUST_NIGHTLY_VERSION }}
           components: rustfmt
