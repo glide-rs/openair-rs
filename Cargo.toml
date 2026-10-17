@@ -24,8 +24,8 @@ log = "0.4"
 serde = { version = "1", optional = true, features = ["derive"] }
 
 [dev-dependencies]
-criterion = "=0.7.0"
+criterion = "=0.8.2"
 env_logger = "=0.11.11"
-serde_json = "=1.0.151"
+serde_json = "=1.0.154"
 indoc = "=2.0.8"
 insta = { version = "=1.49.0", features = ["json"] }
